@@ -45,7 +45,7 @@ export default function App() {
   useEffect(() => {
     const controller = new AbortController(); let mounted = true
     void httpProvider.status(controller.signal).then((status) => {
-      if (mounted) setRealLlmAvailable(status.enabled)
+      if (mounted) setRealLlmAvailable(status.realLlmEnabled && status.serviceAvailable && status.schemaVersion === LLM_SCHEMA_VERSION)
     }).catch(() => { if (mounted) setRealLlmAvailable(false) })
     return () => { mounted = false; controller.abort() }
   }, [httpProvider])

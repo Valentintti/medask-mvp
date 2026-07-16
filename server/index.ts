@@ -28,7 +28,7 @@ function send(response: ServerResponse, routeResponse: RouteResponse): void {
 
 export function createMedAskServer(config: ServerConfig = loadServerConfig(), providerOverride?: ServerLlmProvider | null) {
   const provider = providerOverride === undefined && config.configured
-    ? new OpenAiCompatibleProvider({ apiKey: config.apiKey, baseUrl: config.baseUrl, model: config.model })
+    ? new OpenAiCompatibleProvider({ apiKey: config.apiKey, baseUrl: config.baseUrl, model: config.model, requestTimeoutMs: config.requestTimeoutMs })
     : providerOverride ?? null
   const route = createLlmRouter({ config, provider })
   const hashSalt = randomBytes(32)
@@ -45,12 +45,13 @@ export function createMedAskServer(config: ServerConfig = loadServerConfig(), pr
       const bodyText = ['POST', 'PUT', 'PATCH'].includes(request.method ?? '') ? await readBody(request) : ''
       send(response, await route({
         method: request.method ?? 'GET', path, origin: request.headers.origin ?? null,
+        contentType: request.headers['content-type'] ?? null,
         clientKey: clientKey(request), bodyText, signal: controller.signal,
       }))
     } catch (error) {
       const tooLarge = error instanceof Error && error.message === 'request_too_large'
       send(response, {
-        status: tooLarge ? 413 : 400,
+        status: 400,
         headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
         body: { error: { code: tooLarge ? 'request_too_large' : 'request_invalid', message: '请求无法处理，请使用标准问题继续。' } },
       })

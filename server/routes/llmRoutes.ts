@@ -3,6 +3,8 @@ import { checkTextRisk } from '../../src/engines/riskEngine'
 import { MODEL_BLOCKED_RISK_SLOT_IDS } from '../../src/llm/acceptancePolicy'
 import type { QuestionRewriteRequest, SlotExtractionRequest } from '../../src/llm/types'
 import { ProviderRequestError } from '../providers/openAiCompatibleProvider'
+import { publicLlmStatus } from '../config'
+import { enforceTrustedExtractionScope, enforceTrustedRewriteScope } from '../rules/serverSlotRules'
 import { createAuditLogger } from '../security/auditLogger'
 import { DailyTokenBudget, estimateTokensFromCharacters, OncePerOperationGate, SlidingWindowRateLimiter } from '../security/rateLimiter'
 import { RequestValidationError, sanitizeExtractRequest, sanitizeRewriteRequest } from '../security/requestSanitizer'
@@ -27,10 +29,6 @@ function errorResponse(config: ServerConfig, origin: string | null, status: numb
 function operationKey(clientKey: string, operation: ServerOperation, body: string): string {
   return createHash('sha256').update(`${clientKey}:${operation}:${body}`).digest('hex')
 }
-function modelSafeExtractRequest(input: SlotExtractionRequest): SlotExtractionRequest {
-  const allowedSlotIds = input.allowedSlotIds.filter((slotId) => !MODEL_BLOCKED_RISK_SLOT_IDS.has(slotId))
-  return { ...input, allowedSlotIds, existingSlotIds: input.existingSlotIds.filter((slotId) => allowedSlotIds.includes(slotId)), currentQuestionSlotId: input.currentQuestionSlotId && allowedSlotIds.includes(input.currentQuestionSlotId) ? input.currentQuestionSlotId : null }
-}
 function timeoutSignal(parent: AbortSignal | undefined, timeoutMs: number): { signal: AbortSignal; clear: () => void } {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(new Error('provider_timeout')), timeoutMs)
@@ -49,17 +47,22 @@ export function createLlmRouter(dependencies: LlmRouterDependencies) {
   return async (request: RouteRequest): Promise<RouteResponse> => {
     if (request.origin && !config.allowedOrigins.has(request.origin)) return errorResponse(config, request.origin, 403, 'origin_not_allowed')
     if (request.method === 'OPTIONS') return { status: 204, headers: { ...headers(config, request.origin), 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }, body: null }
-    if (request.path === '/api/llm/status' && request.method === 'GET') return response(config, request.origin, 200, { enabled: config.enabled && config.configured })
+    if (request.path === '/api/llm/status' && request.method === 'GET') {
+      return response(config, request.origin, 200, publicLlmStatus(config, Boolean(provider)))
+    }
     if (!['/api/llm/extract', '/api/llm/rewrite'].includes(request.path) || request.method !== 'POST') return errorResponse(config, request.origin, 404, 'not_found')
+    if (request.contentType?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+      return errorResponse(config, request.origin, 415, 'content_type_not_supported')
+    }
     if (!config.enabled || !config.configured || !provider) return errorResponse(config, request.origin, 503, 'real_llm_unavailable')
 
     const operation: ServerOperation = request.path.endsWith('/extract') ? 'extract' : 'rewrite'
     const requestId = randomUUID(); const startedAt = Date.now()
-    let inputCharacters = 0; let outputCharacters = 0; let acceptedCount = 0; let rejectedCount = 0
+    let inputCharacterCount = 0; let outputCharacterCount = 0
     const log = (status: number, outcome: string, errorCategory: string | null): void => audit({
-      requestId, operation, provider: provider.providerAlias, modelAlias: provider.modelAlias,
+      requestId, operation, providerAlias: provider.providerAlias, modelAlias: provider.modelAlias,
       timestamp: new Date().toISOString(), latencyMs: Date.now() - startedAt, httpStatus: status, outcome,
-      inputCharacters, outputCharacters, acceptedCount, rejectedCount, errorCategory,
+      inputCharacterCount, outputCharacterCount, errorCategory,
     } satisfies AuditEvent)
 
     try {
@@ -68,38 +71,39 @@ export function createLlmRouter(dependencies: LlmRouterDependencies) {
 
       const parsed: SlotExtractionRequest | QuestionRewriteRequest = operation === 'extract'
         ? sanitizeExtractRequest(request.bodyText) : sanitizeRewriteRequest(request.bodyText)
-      inputCharacters = operation === 'extract' ? (parsed as SlotExtractionRequest).userText.length : (parsed as QuestionRewriteRequest).canonicalQuestion.length
+      inputCharacterCount = operation === 'extract' ? (parsed as SlotExtractionRequest).userText.length : (parsed as QuestionRewriteRequest).canonicalQuestion.length
+      if (operation === 'extract' && checkTextRisk((parsed as SlotExtractionRequest).userText).matched) {
+        log(409, 'risk_preempted', 'risk_input')
+        return errorResponse(config, request.origin, 409, 'risk_preempted')
+      }
       const estimatedInput = estimateTokensFromCharacters(request.bodyText.length + 4_000)
       if (estimatedInput > MAX_ESTIMATED_INPUT_TOKENS) throw new RequestValidationError('input_token_budget_exceeded', 413)
       if (!budget.reserve(estimatedInput + RESERVED_OUTPUT_TOKENS)) { log(503, 'fallback', 'daily_budget_exceeded'); return errorResponse(config, request.origin, 503, 'daily_budget_exceeded') }
 
       if (operation === 'extract') {
         const extract = parsed as SlotExtractionRequest
-        if (checkTextRisk(extract.userText).matched) { log(409, 'risk_preempted', 'risk_input'); return errorResponse(config, request.origin, 409, 'risk_preempted') }
-        const safeRequest = modelSafeExtractRequest(extract)
+        const safeRequest = enforceTrustedExtractionScope(extract)
         const timed = timeoutSignal(request.signal, config.requestTimeoutMs)
         try {
           const result = await provider.extractSlots(safeRequest, timed.signal)
-          outputCharacters = result.outputCharacters
+          outputCharacterCount = result.outputCharacters
           const validated = validateExtractionProviderResponse(result.rawJson, safeRequest.allowedSlotIds, safeRequest.userText)
-          acceptedCount = validated.candidates.length
           log(200, 'validated', null)
           return response(config, request.origin, 200, validated)
         } finally { timed.clear() }
       }
 
-      const rewrite = parsed as QuestionRewriteRequest
+      const rewrite = enforceTrustedRewriteScope(parsed as QuestionRewriteRequest)
       if (MODEL_BLOCKED_RISK_SLOT_IDS.has(rewrite.slotId)) { log(400, 'rejected', 'risk_slot_blocked'); return errorResponse(config, request.origin, 400, 'risk_slot_blocked') }
       const timed = timeoutSignal(request.signal, config.requestTimeoutMs)
       try {
         const result = await provider.rewriteQuestion(rewrite, timed.signal)
-        outputCharacters = result.outputCharacters
+        outputCharacterCount = result.outputCharacters
         const validated = validateRewriteProviderResponse(result.rawJson)
-        acceptedCount = 1; log(200, 'validated', null)
+        log(200, 'validated', null)
         return response(config, request.origin, 200, validated)
       } finally { timed.clear() }
     } catch (error) {
-      rejectedCount = 1
       const status = error instanceof RequestValidationError ? error.status
         : error instanceof ProviderRequestError ? (error.code === 'provider_aborted' ? 503 : error.status)
           : error instanceof ResponseValidationError ? 502 : 503

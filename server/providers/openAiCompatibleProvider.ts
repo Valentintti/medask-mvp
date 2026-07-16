@@ -10,7 +10,12 @@ type FetchLike = typeof fetch
 type JsonSchema = Record<string, unknown>
 
 export class ProviderRequestError extends Error {
-  constructor(readonly code: string, readonly status: number, readonly retryable = false) {
+  constructor(
+    readonly code: string,
+    readonly status: number,
+    readonly retryable = false,
+    readonly retryAfterMs: number | null = null,
+  ) {
     super(code); this.name = 'ProviderRequestError'
   }
 }
@@ -41,8 +46,9 @@ function extractContent(bodyText: string): { content: string; usage: ProviderUsa
 async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) throw abortReason(signal)
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms)
-    signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new ProviderRequestError('provider_aborted', 499)) }, { once: true })
+    const onAbort = () => { clearTimeout(timer); reject(abortReason(signal)) }
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve() }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
   })
 }
 function abortReason(signal?: AbortSignal): ProviderRequestError {
@@ -51,7 +57,24 @@ function abortReason(signal?: AbortSignal): ProviderRequestError {
 }
 
 export interface OpenAiCompatibleProviderOptions {
-  apiKey: string; baseUrl: string; model: string; fetchFn?: FetchLike
+  apiKey: string; baseUrl: string; model: string; requestTimeoutMs?: number; fetchFn?: FetchLike
+}
+
+function retryAfterMilliseconds(response: Response): number | null {
+  const value = response.headers.get('retry-after')?.trim()
+  if (!value) return null
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000)
+  const date = Date.parse(value)
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null
+}
+
+function upstreamError(response: Response): ProviderRequestError {
+  if (response.status === 429) return new ProviderRequestError('provider_rate_limited', 429, true, retryAfterMilliseconds(response))
+  if ([401, 403].includes(response.status)) return new ProviderRequestError('provider_auth_error', 503)
+  if (response.status >= 400 && response.status < 500) return new ProviderRequestError('provider_request_rejected', 502)
+  if (response.status >= 500) return new ProviderRequestError('provider_upstream_error', 502, true)
+  return new ProviderRequestError('provider_upstream_error', 502)
 }
 
 export class OpenAiCompatibleProvider implements ServerLlmProvider {
@@ -68,6 +91,13 @@ export class OpenAiCompatibleProvider implements ServerLlmProvider {
   }
 
   private async invoke(systemPrompt: string, userPrompt: string, schema: JsonSchema, schemaName: string, signal?: AbortSignal): Promise<ServerProviderResult> {
+    const requestTimeoutMs = this.options.requestTimeoutMs ?? 8000
+    const deadline = Date.now() + requestTimeoutMs
+    const timeoutController = new AbortController()
+    const timeout = setTimeout(() => timeoutController.abort(new Error('provider_timeout')), requestTimeoutMs)
+    const forwardAbort = () => timeoutController.abort(signal?.reason)
+    signal?.addEventListener('abort', forwardAbort, { once: true })
+    const requestSignal = timeoutController.signal
     const requestBody = JSON.stringify({
       model: this.options.model,
       messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
@@ -75,35 +105,43 @@ export class OpenAiCompatibleProvider implements ServerLlmProvider {
       max_tokens: MAX_OUTPUT_TOKENS,
     })
     let lastError: ProviderRequestError | null = null
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      if (signal?.aborted) throw abortReason(signal)
-      try {
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (requestSignal.aborted) throw abortReason(requestSignal)
+        try {
         const response = await this.fetchFn(completionEndpoint(this.options.baseUrl), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.options.apiKey}` },
           body: requestBody,
-          signal,
+          signal: requestSignal,
         })
+        if (requestSignal.aborted) throw abortReason(requestSignal)
         if (!response.ok) {
-          const retryable = response.status === 429 || response.status >= 500
-          throw new ProviderRequestError(response.status === 429 ? 'provider_rate_limited' : 'provider_upstream_error', response.status === 429 ? 429 : 502, retryable)
+          throw upstreamError(response)
         }
         const declaredLength = Number(response.headers.get('content-length') ?? 0)
         if (declaredLength > MAX_UPSTREAM_BODY_BYTES) throw new ProviderRequestError('provider_response_too_large', 502)
         const bodyText = await response.text()
+        if (requestSignal.aborted) throw abortReason(requestSignal)
         if (Buffer.byteLength(bodyText, 'utf8') > MAX_UPSTREAM_BODY_BYTES) throw new ProviderRequestError('provider_response_too_large', 502)
         const extracted = extractContent(bodyText)
         return {
           rawJson: extracted.content, inputCharacters: systemPrompt.length + userPrompt.length,
           outputCharacters: extracted.content.length, usage: extracted.usage, upstreamStatus: response.status,
         }
-      } catch (error) {
-        if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw abortReason(signal)
-        lastError = error instanceof ProviderRequestError ? error : new ProviderRequestError('provider_network_error', 503, true)
-        if (!lastError.retryable || attempt === 1) throw lastError
-        await abortableDelay(100, signal)
+        } catch (error) {
+          if (requestSignal.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw abortReason(requestSignal)
+          lastError = error instanceof ProviderRequestError ? error : new ProviderRequestError('provider_network_error', 503, true)
+          if (!lastError.retryable || attempt === 1) throw lastError
+          const retryDelayMs = lastError.retryAfterMs ?? 100
+          if (Date.now() + retryDelayMs >= deadline) throw lastError
+          await abortableDelay(retryDelayMs, requestSignal)
+        }
       }
+      throw lastError ?? new ProviderRequestError('provider_error', 503)
+    } finally {
+      clearTimeout(timeout)
+      signal?.removeEventListener('abort', forwardAbort)
     }
-    throw lastError ?? new ProviderRequestError('provider_error', 503)
   }
 }

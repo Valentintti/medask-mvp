@@ -100,7 +100,7 @@ async function main() {
     console.info('SKIPPED: 未检测到已启用且完整的本机真实模型配置；没有调用任何真实API。')
     return
   }
-  const provider = new OpenAiCompatibleProvider({ apiKey: config.apiKey, baseUrl: config.baseUrl, model: config.model })
+  const provider = new OpenAiCompatibleProvider({ apiKey: config.apiKey, baseUrl: config.baseUrl, model: config.model, requestTimeoutMs: config.requestTimeoutMs })
   const runs: Array<Awaited<ReturnType<typeof runOnce>>> = []
   for (let index = 0; index < 3; index += 1) runs.push(await runOnce(provider, config.requestTimeoutMs))
   const consistent = cases.filter((item) => runs.every((run) => JSON.stringify(run.outputs[item.id]) === JSON.stringify(runs[0].outputs[item.id]))).length

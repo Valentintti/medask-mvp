@@ -8,7 +8,9 @@
     "dev:client": "vite --host 127.0.0.1",
     "dev:server": "tsx watch server/index.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json",
-    "build": "pnpm typecheck && vite build && vite build --config vite.server.config.ts",
+    "build:client": "vite build && node scripts/check-client-bundle-secrets.mjs",
+    "build:server": "vite build --config vite.server.config.ts",
+    "build": "pnpm typecheck && pnpm build:client && pnpm build:server",
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:real": "tsx scripts/evaluate-real-provider.ts"

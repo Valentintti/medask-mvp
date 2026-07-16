@@ -1,25 +1,19 @@
 import { SHARED_LLM_SCHEMA_VERSION } from '../../shared/llm/contracts'
 import type { QuestionRewriteRequest, SlotExtractionRequest } from '../../src/llm/types'
+import { SERVER_COMPLAINT_IDS, SERVER_SUPPORTED_SLOT_IDS } from '../rules/serverSlotRules'
+import { RequestValidationError } from './errors'
+
+export { RequestValidationError } from './errors'
 
 export const MAX_REQUEST_BODY_BYTES = 16_384
 export const MAX_USER_TEXT_CHARACTERS = 500
 export const MAX_ALLOWED_SLOT_IDS = 32
-export const SUPPORTED_COMPLAINTS = new Set(['fever', 'cough'])
-export const SUPPORTED_SLOT_IDS = new Set([
-  'onset', 'breathingDifficulty', 'medicationHistory', 'currentTemperature', 'maxTemperature',
-  'feverPattern', 'chills', 'coughAssociated', 'headacheAssociated', 'chestPain', 'duration',
-  'coughType', 'sputumColor', 'feverAssociated', 'chestDiscomfort', 'breathingImpact',
-  'nocturnalWorsening',
-])
 
 const EXTRACT_KEYS = ['supportedComplaints', 'allowedSlotIds', 'currentQuestionSlotId', 'userText', 'existingSlotIds', 'locale', 'schemaVersion']
 const REWRITE_REQUIRED_KEYS = ['schemaVersion', 'slotId', 'canonicalQuestion', 'complaintContext', 'required', 'inputType', 'locale']
 const REWRITE_OPTIONAL_KEYS = ['unit']
 const INVISIBLE_OR_CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/gu
 
-export class RequestValidationError extends Error {
-  constructor(readonly code: string, readonly status = 400) { super(code); this.name = 'RequestValidationError' }
-}
 function record(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value) }
 function exactKeys(value: Record<string, unknown>, required: string[], optional: string[] = []): boolean {
   const allowed = new Set([...required, ...optional])
@@ -37,7 +31,7 @@ function stringArray(value: unknown, max: number): string[] | null {
 }
 function complaints(value: unknown): ('fever' | 'cough')[] | null {
   const items = stringArray(value, 2)
-  if (!items || items.length === 0 || !items.every((item) => SUPPORTED_COMPLAINTS.has(item))) return null
+  if (!items || items.length === 0 || !items.every((item) => SERVER_COMPLAINT_IDS.has(item as 'fever' | 'cough'))) return null
   return items as ('fever' | 'cough')[]
 }
 export function sanitizeExtractRequest(bodyText: string): SlotExtractionRequest {
@@ -51,11 +45,11 @@ export function sanitizeExtractRequest(bodyText: string): SlotExtractionRequest 
     ? null
     : typeof raw.currentQuestionSlotId === 'string' ? stripUnsafeCharacters(raw.currentQuestionSlotId) : ''
   if (!supportedComplaints || !allowedSlotIds || !existingSlotIds) throw new RequestValidationError('request_values_invalid')
-  if (!allowedSlotIds.every((slotId) => SUPPORTED_SLOT_IDS.has(slotId))) throw new RequestValidationError('slot_not_allowed')
+  if (!allowedSlotIds.every((slotId) => SERVER_SUPPORTED_SLOT_IDS.has(slotId))) throw new RequestValidationError('slot_not_allowed')
   if (!existingSlotIds.every((slotId) => allowedSlotIds.includes(slotId))) throw new RequestValidationError('existing_slot_not_allowed')
   if (currentQuestionSlotId && !allowedSlotIds.includes(currentQuestionSlotId)) throw new RequestValidationError('current_slot_not_allowed')
   if (!userText) throw new RequestValidationError('empty_user_text')
-  if ([...userText].length > MAX_USER_TEXT_CHARACTERS) throw new RequestValidationError('user_text_too_long', 413)
+  if ([...userText].length > MAX_USER_TEXT_CHARACTERS) throw new RequestValidationError('user_text_too_long')
   if (raw.locale !== 'zh-CN' || raw.schemaVersion !== SHARED_LLM_SCHEMA_VERSION) throw new RequestValidationError('request_version_invalid')
   return { supportedComplaints, allowedSlotIds, currentQuestionSlotId, userText, existingSlotIds, locale: 'zh-CN', schemaVersion: SHARED_LLM_SCHEMA_VERSION }
 }
@@ -66,7 +60,7 @@ export function sanitizeRewriteRequest(bodyText: string): QuestionRewriteRequest
   const slotId = typeof raw.slotId === 'string' ? stripUnsafeCharacters(raw.slotId) : ''
   const canonicalQuestion = typeof raw.canonicalQuestion === 'string' ? stripUnsafeCharacters(raw.canonicalQuestion) : ''
   const unit = raw.unit === undefined ? undefined : typeof raw.unit === 'string' ? stripUnsafeCharacters(raw.unit) : ''
-  if (!complaintContext || !SUPPORTED_SLOT_IDS.has(slotId) || !canonicalQuestion || canonicalQuestion.length > 240) throw new RequestValidationError('request_values_invalid')
+  if (!complaintContext || !SERVER_SUPPORTED_SLOT_IDS.has(slotId) || !canonicalQuestion || canonicalQuestion.length > 240) throw new RequestValidationError('request_values_invalid')
   if (raw.schemaVersion !== SHARED_LLM_SCHEMA_VERSION || raw.locale !== 'zh-CN') throw new RequestValidationError('request_version_invalid')
   if (typeof raw.required !== 'boolean' || !['text', 'number', 'boolean', 'singleSelect'].includes(String(raw.inputType))) throw new RequestValidationError('request_values_invalid')
   if (unit !== undefined && (!unit || unit.length > 12)) throw new RequestValidationError('request_values_invalid')

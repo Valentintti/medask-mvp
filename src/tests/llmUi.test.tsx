@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
 
+const enabledStatus = { realLlmEnabled: true, serviceAvailable: true, schemaVersion: '1.1' }
+
 describe('开发模式Mock适配器页面', () => {
   afterEach(() => vi.unstubAllGlobals())
   it('首页提供默认关闭的Mock开关和问题表达模式', () => {
@@ -68,7 +70,7 @@ describe('开发模式Mock适配器页面', () => {
 
   it('服务端启用后Real模式可通过受控网关接受合法自由文本', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith('/api/llm/status')) return new Response(JSON.stringify({ enabled: true }), { status: 200 })
+      if (String(input).endsWith('/api/llm/status')) return new Response(JSON.stringify(enabledStatus), { status: 200 })
       return new Response(JSON.stringify({ schemaVersion: '1.1', candidates: [{ slotId: 'onset', value: '昨天', confidence: 0.99, evidence: '昨天', status: 'asserted' }], unresolvedSlotIds: [], needsClarification: false }), { status: 200 })
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -81,7 +83,7 @@ describe('开发模式Mock适配器页面', () => {
   })
 
   it('Real模式风险原文在本地升级且不请求extract端点', async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({ enabled: true }), { status: 200 }))
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify(enabledStatus), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup(); render(<App />)
     const real = await screen.findByLabelText('Real LLM'); await vi.waitFor(() => expect(real).toBeEnabled())
@@ -94,8 +96,22 @@ describe('开发模式Mock适配器页面', () => {
 
   it('Real服务503后显示固定提示并切换为标准问题模式', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith('/api/llm/status')
-      ? new Response(JSON.stringify({ enabled: true }), { status: 200 })
+      ? new Response(JSON.stringify(enabledStatus), { status: 200 })
       : new Response(JSON.stringify({ error: { code: 'real_llm_unavailable' } }), { status: 503 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup(); render(<App />)
+    const real = await screen.findByLabelText('Real LLM'); await vi.waitFor(() => expect(real).toBeEnabled())
+    await user.click(real); await user.click(screen.getByRole('button', { name: '发热快速入口' }))
+    await user.type(screen.getByLabelText('也可以用一句话回答当前问题'), '普通描述')
+    await user.click(screen.getByRole('button', { name: '整理这段描述' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('自然语言辅助暂时不可用，已切换为标准问题模式。')
+    expect(screen.queryByLabelText('也可以用一句话回答当前问题')).not.toBeInTheDocument()
+  })
+
+  it('Real服务429后显示固定提示并切换为标准问题模式', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith('/api/llm/status')
+      ? new Response(JSON.stringify(enabledStatus), { status: 200 })
+      : new Response(JSON.stringify({ error: { code: 'rate_limited' } }), { status: 429 }))
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup(); render(<App />)
     const real = await screen.findByLabelText('Real LLM'); await vi.waitFor(() => expect(real).toBeEnabled())

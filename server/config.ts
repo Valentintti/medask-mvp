@@ -33,15 +33,23 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env, c
   const baseUrl = validBaseUrl(value('LLM_BASE_URL').trim())
   const apiKey = value('LLM_API_KEY').trim()
   const model = value('LLM_MODEL').trim()
-  const extraOrigins = value('LLM_ALLOWED_ORIGINS').split(',').map((item) => item.trim()).filter(Boolean)
+  const configuredOrigins = (value('ALLOWED_ORIGINS') || LOCAL_ORIGINS.join(',')).split(',').map((item) => item.trim()).filter(Boolean)
   return {
     enabled: value('ENABLE_REAL_LLM').trim().toLowerCase() === 'true', configured: Boolean(apiKey && baseUrl && model),
     apiKey, baseUrl, model,
     requestTimeoutMs: integer(value('LLM_REQUEST_TIMEOUT_MS'), 8000, 500, 30000),
     maxRequestsPerMinute: integer(value('LLM_MAX_REQUESTS_PER_MINUTE'), 10, 1, 120),
     dailyTokenBudget: integer(value('LLM_DAILY_TOKEN_BUDGET'), 50000, 1000, 10_000_000),
-    allowedOrigins: new Set([...LOCAL_ORIGINS, ...extraOrigins]), host: value('LLM_SERVER_HOST').trim() || '127.0.0.1',
+    allowedOrigins: new Set(configuredOrigins), host: value('LLM_SERVER_HOST').trim() || '127.0.0.1',
     port: integer(value('LLM_SERVER_PORT'), 8787, 1, 65535),
   }
 }
-export function publicLlmStatus(config: ServerConfig): { enabled: boolean } { return { enabled: config.enabled && config.configured } }
+export function publicLlmStatus(config: ServerConfig, providerAvailable: boolean): {
+  realLlmEnabled: boolean; serviceAvailable: boolean; schemaVersion: '1.1'
+} {
+  return {
+    realLlmEnabled: config.enabled,
+    serviceAvailable: config.enabled && config.configured && providerAvailable,
+    schemaVersion: '1.1',
+  }
+}

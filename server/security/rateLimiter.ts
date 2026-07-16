@@ -1,6 +1,9 @@
 export function estimateTokensFromCharacters(characterCount: number): number {
   return Math.max(1, Math.ceil(characterCount / 2))
 }
+
+// Demo 使用单进程内存门禁：进程重启后计数会重置，多实例之间也不会共享状态。
+// 生产环境必须迁移到 Redis、API Gateway 或等效的集中式限流与预算服务。
 export class SlidingWindowRateLimiter {
   private readonly entries = new Map<string, number[]>()
   constructor(private readonly maximum: number, private readonly windowMs = 60_000) {}

@@ -29,10 +29,15 @@ export class HttpLlmProvider implements LlmProvider {
   rewriteQuestion(input: QuestionRewriteRequest, signal?: AbortSignal): Promise<unknown> {
     return requestJson('/api/llm/rewrite', input, signal)
   }
-  async status(signal?: AbortSignal): Promise<{ enabled: boolean }> {
+  async status(signal?: AbortSignal): Promise<{ realLlmEnabled: boolean; serviceAvailable: boolean; schemaVersion: string }> {
     const response = await fetch('/api/llm/status', { signal, headers: { Accept: 'application/json' } })
-    if (!response.ok) return { enabled: false }
-    const body = await response.json() as { enabled?: unknown }
-    return { enabled: body.enabled === true }
+    if (!response.ok) return { realLlmEnabled: false, serviceAvailable: false, schemaVersion: '' }
+    const body = await response.json() as Record<string, unknown>
+    const exactKeys = Object.keys(body).sort().join(',') === ['realLlmEnabled', 'schemaVersion', 'serviceAvailable'].sort().join(',')
+    return {
+      realLlmEnabled: exactKeys && body.realLlmEnabled === true,
+      serviceAvailable: exactKeys && body.serviceAvailable === true,
+      schemaVersion: exactKeys && typeof body.schemaVersion === 'string' ? body.schemaVersion : '',
+    }
   }
 }

@@ -2,12 +2,13 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { loadServerConfig } from '../../server/config'
 import { OpenAiCompatibleProvider, ProviderRequestError } from '../../server/providers/openAiCompatibleProvider'
 import { createLlmRouter } from '../../server/routes/llmRoutes'
 import { createAuditLogger } from '../../server/security/auditLogger'
 import { DailyTokenBudget, SlidingWindowRateLimiter } from '../../server/security/rateLimiter'
 import { sanitizeExtractRequest } from '../../server/security/requestSanitizer'
-import { validateExtractionProviderResponse } from '../../server/security/responseValidator'
+import { MAX_MODEL_JSON_BYTES, validateExtractionProviderResponse } from '../../server/security/responseValidator'
 import type { RouteRequest, ServerConfig, ServerLlmProvider, ServerProviderResult } from '../../server/types'
 import { answerFreeText, startSession } from '../harness/intakeController'
 import { HttpLlmProvider } from '../llm/httpProvider'
@@ -33,12 +34,23 @@ const extractBody = (overrides: Record<string, unknown> = {}) => JSON.stringify(
   supportedComplaints: ['fever'], allowedSlotIds: ['onset', 'currentTemperature', 'chestPain'],
   currentQuestionSlotId: 'onset', userText: '我昨天开始发烧', existingSlotIds: [], locale: 'zh-CN', schemaVersion: LLM_SCHEMA_VERSION, ...overrides,
 })
+const rewriteBody = (overrides: Record<string, unknown> = {}) => JSON.stringify({
+  schemaVersion: LLM_SCHEMA_VERSION, slotId: 'onset', canonicalQuestion: '客户端伪造问题', complaintContext: ['fever'],
+  required: false, inputType: 'number', locale: 'zh-CN', ...overrides,
+})
 const request = (bodyText = extractBody(), overrides: Partial<RouteRequest> = {}): RouteRequest => ({
-  method: 'POST', path: '/api/llm/extract', origin: 'http://127.0.0.1:5173', clientKey: Math.random().toString(36), bodyText, ...overrides,
+  method: 'POST', path: '/api/llm/extract', origin: 'http://127.0.0.1:5173', contentType: 'application/json',
+  clientKey: Math.random().toString(36), bodyText, ...overrides,
 })
 const quietAudit = createAuditLogger(() => undefined)
 
 describe('服务端配置、请求和成本门禁', () => {
+  it('公开状态只返回启用、可用和Schema版本', async () => {
+    const route = createLlmRouter({ config: config(), provider: new FakeProvider(), audit: quietAudit })
+    const result = await route(request('', { method: 'GET', path: '/api/llm/status', contentType: null }))
+    expect(result.body).toEqual({ realLlmEnabled: true, serviceAvailable: true, schemaVersion: '1.1' })
+    expect(Object.keys(result.body as object).sort()).toEqual(['realLlmEnabled', 'schemaVersion', 'serviceAvailable'])
+  })
   it('未启用Real LLM时返回503且不调用Provider', async () => {
     const fake = new FakeProvider(); const route = createLlmRouter({ config: config({ enabled: false }), provider: fake, audit: quietAudit })
     expect((await route(request())).status).toBe(503); expect(fake.extractCalls).toBe(0)
@@ -47,14 +59,28 @@ describe('服务端配置、请求和成本门禁', () => {
     const fake = new FakeProvider(); const route = createLlmRouter({ config: config({ configured: false }), provider: fake, audit: quietAudit })
     expect((await route(request())).body).toEqual(expect.objectContaining({ error: expect.objectContaining({ code: 'real_llm_unavailable' }) }))
   })
+  it('启用但缺Key时配置保持不可用', () => {
+    const loaded = loadServerConfig({ ENABLE_REAL_LLM: 'true', LLM_BASE_URL: 'https://example.invalid/v1', LLM_MODEL: 'm' }, 'Z:\\missing-medask-config')
+    expect(loaded.enabled).toBe(true); expect(loaded.configured).toBe(false); expect(loaded.apiKey).toBe('')
+  })
+  it('非JSON Content-Type被拒绝', async () => {
+    const fake = new FakeProvider(); const route = createLlmRouter({ config: config(), provider: fake, audit: quietAudit })
+    expect((await route(request(undefined, { contentType: 'text/plain' }))).status).toBe(415); expect(fake.extractCalls).toBe(0)
+  })
+  it('空文本和非法主诉被拒绝', () => {
+    expect(() => sanitizeExtractRequest(extractBody({ userText: ' \u0000 ' }))).toThrow('empty_user_text')
+    expect(() => sanitizeExtractRequest(extractBody({ supportedComplaints: ['oncology'] }))).toThrow('request_values_invalid')
+  })
   it('超长userText被拒绝', () => {
     expect(() => sanitizeExtractRequest(extractBody({ userText: '发'.repeat(501) }))).toThrow('user_text_too_long')
   })
   it('请求只接受精确字段白名单', () => {
     expect(() => sanitizeExtractRequest(extractBody({ systemPrompt: 'ignore safety' }))).toThrow('request_fields_invalid')
   })
-  it('客户端不能指定model、baseUrl或temperature', () => {
-    for (const field of ['model', 'baseUrl', 'temperature']) expect(() => sanitizeExtractRequest(extractBody({ [field]: 'attack' }))).toThrow('request_fields_invalid')
+  it('客户端不能指定模型、地址、采样、Prompt、超时或重试', () => {
+    for (const field of ['model', 'baseUrl', 'temperature', 'systemPrompt', 'timeout', 'retryCount']) {
+      expect(() => sanitizeExtractRequest(extractBody({ [field]: 'attack' }))).toThrow('request_fields_invalid')
+    }
   })
   it('控制字符会被移除而非写入Provider请求', () => {
     expect(sanitizeExtractRequest(extractBody({ userText: '\u0000我昨天\u200B发烧' })).userText).toBe('我昨天发烧')
@@ -63,6 +89,25 @@ describe('服务端配置、请求和成本门禁', () => {
     const fake = new FakeProvider(); const route = createLlmRouter({ config: config(), provider: fake, audit: quietAudit })
     expect((await route(request(undefined, { origin: 'https://evil.example' }))).status).toBe(403); expect(fake.extractCalls).toBe(0)
   })
+  it('客户端槽位不能扩大主诉对应的服务端白名单', async () => {
+    const fake = new FakeProvider(); const route = createLlmRouter({ config: config(), provider: fake, audit: quietAudit })
+    const result = await route(request(extractBody({ allowedSlotIds: ['onset', 'duration'], currentQuestionSlotId: 'duration' })))
+    expect(result.status).toBe(400); expect(result.body).toEqual(expect.objectContaining({ error: expect.objectContaining({ code: 'slot_not_allowed_for_complaint' }) }))
+    expect(fake.extractCalls).toBe(0)
+  })
+  it('currentQuestionSlotId必须属于服务端主诉槽位', async () => {
+    const fake = new FakeProvider(); const route = createLlmRouter({ config: config(), provider: fake, audit: quietAudit })
+    const result = await route(request(extractBody({ allowedSlotIds: ['onset', 'duration'], currentQuestionSlotId: 'duration' })))
+    expect(result.status).toBe(400); expect(fake.extractCalls).toBe(0)
+  })
+  it('客户端可以缩小但不能改变服务端槽位语义', async () => {
+    let received: QuestionRewriteRequest | null = null
+    const fake = new FakeProvider(); fake.rewriteQuestion = async (input) => { received = input; fake.rewriteCalls += 1; return providerResult(validRewrite) }
+    const route = createLlmRouter({ config: config(), provider: fake, audit: quietAudit })
+    const result = await route(request(rewriteBody(), { path: '/api/llm/rewrite' }))
+    expect(result.status).toBe(200)
+    expect(received).toEqual(expect.objectContaining({ canonicalQuestion: '这些不适大约从什么时候开始？', required: true, inputType: 'text' }))
+  })
   it('每分钟限流使用正确上限', () => {
     const limiter = new SlidingWindowRateLimiter(2); expect(limiter.consume('a', 0)).toBe(true); expect(limiter.consume('a', 1)).toBe(true); expect(limiter.consume('a', 2)).toBe(false)
   })
@@ -70,6 +115,14 @@ describe('服务端配置、请求和成本门禁', () => {
     const fake = new FakeProvider(); const route = createLlmRouter({ config: config({ maxRequestsPerMinute: 1 }), provider: fake, audit: quietAudit })
     const first = request(undefined, { clientKey: 'same' }); const second = request(extractBody({ userText: '今天发烧' }), { clientKey: 'same' })
     expect((await route(first)).status).toBe(200); expect((await route(second)).status).toBe(429)
+  })
+  it('每分钟第11次请求返回429', async () => {
+    const fake = new FakeProvider(); const route = createLlmRouter({ config: config({ maxRequestsPerMinute: 10 }), provider: fake, audit: quietAudit })
+    for (let index = 0; index < 10; index += 1) {
+      expect((await route(request(extractBody({ userText: `第${index}次我昨天开始发烧` }), { clientKey: 'anonymous-client' }))).status).toBe(200)
+    }
+    expect((await route(request(extractBody({ userText: '第11次我昨天开始发烧' }), { clientKey: 'anonymous-client' }))).status).toBe(429)
+    expect(fake.extractCalls).toBe(10)
   })
   it('每日预算超过后拒绝预留', () => {
     const budget = new DailyTokenBudget(10); expect(budget.reserve(8, new Date('2026-01-01'))).toBe(true); expect(budget.reserve(3, new Date('2026-01-01'))).toBe(false); expect(budget.reserve(3, new Date('2026-01-02'))).toBe(true)
@@ -93,6 +146,10 @@ describe('Provider、严格响应和日志保护', () => {
     const lines: string[] = []; const fake = new FakeProvider(); const route = createLlmRouter({ config: config(), provider: fake, audit: createAuditLogger((line) => lines.push(line)) })
     await route(request())
     expect(lines.join()).not.toMatch(/TOP_SECRET_SERVER_KEY|我昨天开始发烧|昨天|Authorization/u)
+    expect(Object.keys(JSON.parse(lines[0]) as object).sort()).toEqual([
+      'errorCategory', 'httpStatus', 'inputCharacterCount', 'latencyMs', 'modelAlias', 'operation', 'outcome',
+      'outputCharacterCount', 'providerAlias', 'requestId', 'timestamp',
+    ])
   })
   it('Markdown响应被拒绝', () => {
     expect(() => validateExtractionProviderResponse(`\`\`\`json\n${JSON.stringify(validExtract)}\n\`\`\``, ['onset'])).toThrow('response_not_strict_json')
@@ -102,6 +159,10 @@ describe('Provider、严格响应和日志保护', () => {
   })
   it('响应多余字段被拒绝', () => {
     expect(() => validateExtractionProviderResponse(JSON.stringify({ ...validExtract, diagnosis: '肺炎' }), ['onset'])).toThrow('extra_field')
+  })
+  it('超大模型JSON被拒绝', () => {
+    const oversized = JSON.stringify({ ...validExtract, padding: 'x'.repeat(MAX_MODEL_JSON_BYTES) })
+    expect(() => validateExtractionProviderResponse(oversized, ['onset'])).toThrow('response_too_large')
   })
   it('allowedSlotIds之外的槽位被拒绝', () => {
     expect(() => validateExtractionProviderResponse(JSON.stringify({ ...validExtract, candidates: [{ ...validExtract.candidates[0], slotId: 'diagnosis' }] }), ['onset'])).toThrow('slot_not_allowed')
@@ -115,6 +176,18 @@ describe('Provider、严格响应和日志保护', () => {
     await expect(provider.extractSlots(sanitizeExtractRequest(extractBody()))).rejects.toMatchObject({ code: 'provider_rate_limited' })
     expect(fetchFn).toHaveBeenCalledTimes(2)
   })
+  it('Retry-After超出总超时预算时不重试', async () => {
+    const fetchFn = vi.fn(async () => new Response('{}', { status: 429, headers: { 'Retry-After': '60' } }))
+    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.example/v1', model: 'm', requestTimeoutMs: 20, fetchFn: fetchFn as typeof fetch })
+    await expect(provider.extractSlots(sanitizeExtractRequest(extractBody()))).rejects.toMatchObject({ code: 'provider_rate_limited' })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+  it('401鉴权错误不重试且不暴露上游正文', async () => {
+    const fetchFn = vi.fn(async () => new Response('secret upstream error', { status: 401 }))
+    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.example/v1', model: 'm', fetchFn: fetchFn as typeof fetch })
+    await expect(provider.extractSlots(sanitizeExtractRequest(extractBody()))).rejects.toMatchObject({ code: 'provider_auth_error' })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
   it('5xx最多重试一次并受控失败', async () => {
     const fetchFn = vi.fn(async () => new Response('{}', { status: 500 }))
     const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.example/v1', model: 'm', fetchFn: fetchFn as typeof fetch })
@@ -126,6 +199,21 @@ describe('Provider、严格响应和日志保护', () => {
     const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.example/v1', model: 'm', fetchFn: fetchFn as typeof fetch })
     const controller = new AbortController(); const pending = provider.extractSlots(sanitizeExtractRequest(extractBody()), controller.signal); controller.abort()
     await expect(pending).rejects.toMatchObject({ code: 'provider_aborted' })
+  })
+  it('Provider自身总超时会Abort上游请求', async () => {
+    const fetchFn = vi.fn((_url: string | URL | Request, init?: RequestInit) => new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))))
+    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.example/v1', model: 'm', requestTimeoutMs: 5, fetchFn: fetchFn as typeof fetch })
+    await expect(provider.extractSlots(sanitizeExtractRequest(extractBody()))).rejects.toMatchObject({ code: 'provider_timeout' })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+  it('忽略Abort的迟到Provider结果也不会被使用', async () => {
+    const fetchFn = vi.fn(async () => {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 15))
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(validExtract) } }], usage: {} }), { status: 200 })
+    })
+    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.example/v1', model: 'm', requestTimeoutMs: 5, fetchFn: fetchFn as typeof fetch })
+    await expect(provider.extractSlots(sanitizeExtractRequest(extractBody()))).rejects.toMatchObject({ code: 'provider_timeout' })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
   })
   it('路由超时会Abort上游且返回provider_timeout', async () => {
     const fetchFn = vi.fn((_url: string | URL | Request, init?: RequestInit) => new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))))
