@@ -40,7 +40,7 @@ function rawGet(port: number, path: string): Promise<{ status: number; body: str
   })
 }
 
-describe('Railpack 单服务静态页面与 API 路由', () => {
+describe('Render 单服务静态页面与 API 路由', () => {
   const staticRoot = mkdtempSync(join(tmpdir(), 'medask-static-'))
   const assetsRoot = join(staticRoot, 'assets')
   const server = createMedAskServer(disabledConfig, null, staticRoot)

@@ -136,7 +136,7 @@ pnpm eval:real
 
 `pnpm build` 会分别构建浏览器和服务端产物，并扫描浏览器 bundle，防止服务端 Key 或内部配置标记被打包。`pnpm eval:real` 在没有完整本机配置时安全跳过，不调用 API；配置后也只对合成文本运行三轮工程评测，不使用真实患者数据。
 
-## 生产构建与 Railway Railpack
+## 生产构建与 Render Node
 
 本地生产构建：
 
@@ -145,20 +145,19 @@ pnpm build
 pnpm start
 ```
 
-生产 Node 服务默认监听 `0.0.0.0:8787`，优先使用环境变量 `HOST`、`PORT`。它在同一端口提供 `dist/` 前端、SPA 路由、`/api/llm/*` 和 `/health`；浏览器生产请求始终使用同源 `/api`。Railway 会自动注入 `PORT`，不要在 Railway Variables 中手动设置。
+生产 Node 服务默认监听 `0.0.0.0:8787`，优先使用环境变量 `HOST`、`PORT`。它在同一端口提供 `dist/` 前端、SPA 路由、`/api/llm/*` 和 `/health`；浏览器生产请求始终使用同源 `/api`。Render 会注入 `PORT`，本地未提供时回退到 `8787`。
 
-`railway.json` 明确使用 Railpack：
+Render Web Service 使用原生 Node 环境，`.node-version` 锁定 Node `22.22.0`：
 
-- Build Command：`pnpm build`
+- Build Command：`pnpm install --frozen-lockfile && pnpm build`
 - Start Command：`pnpm start`
 - Health Check Path：`/health`
-- Restart Policy：`ON_FAILURE`
 
-Railway Variables 需配置：`ENABLE_REAL_LLM`、`LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`、`DEEPSEEK_STRICT_TOOL_ENABLED`、`LLM_REQUEST_TIMEOUT_MS`、`LLM_MAX_REQUESTS_PER_MINUTE`、`LLM_DAILY_TOKEN_BUDGET`、`HOST`。获得 Railway HTTPS 域名后，再将该域名加入 `ALLOWED_ORIGINS`（若保留跨源限制）。Key 只在 Railway 后台填写，不写入仓库。
+Render Environment 需配置：`ENABLE_REAL_LLM`、`LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`、`DEEPSEEK_STRICT_TOOL_ENABLED`、`LLM_REQUEST_TIMEOUT_MS`、`LLM_MAX_REQUESTS_PER_MINUTE`、`LLM_DAILY_TOKEN_BUDGET`、`HOST`、`ALLOWED_ORIGINS`。`HOST` 设为 `0.0.0.0`；`PORT` 由 Render 注入，不需要手动配置。获得 Render HTTPS 域名后，将该域名加入 `ALLOWED_ORIGINS`。Key 只在 Render 后台填写，不写入仓库。
 
 ## 可选本地 Docker 方案
 
-Railway 不使用 Docker。根目录不再存在 `Dockerfile`；可选的本地 Compose 方案明确使用 `deploy/Dockerfile.local`，仍构建独立的 Nginx 前端和 Node 服务端：
+Render 线上部署不使用 Docker。可选的本地 Compose 方案仍明确使用 `deploy/Dockerfile.local`，构建独立的 Nginx 前端和 Node 服务端：
 
 ```bash
 copy .env.example .env
