@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { loadServerConfig } from '../../server/config'
 import { createMedAskServer } from '../../server/index'
-import { OpenAiCompatibleProvider, ProviderRequestError } from '../../server/providers/openAiCompatibleProvider'
+import { OpenAiCompatibleProvider, ProviderRequestError, SLOT_EXTRACTION_MAX_TOKENS } from '../../server/providers/openAiCompatibleProvider'
 import { createLlmRouter } from '../../server/routes/llmRoutes'
 import { createAuditLogger } from '../../server/security/auditLogger'
 import { DailyTokenBudget, SlidingWindowRateLimiter } from '../../server/security/rateLimiter'
@@ -97,6 +97,25 @@ describe('服务端配置、请求和成本门禁', () => {
     expect(() => sanitizeExtractRequest(extractBody({ userText: ' \u0000 ' }))).toThrow('empty_user_text')
     expect(() => sanitizeExtractRequest(extractBody({ supportedComplaints: ['oncology'] }))).toThrow('request_values_invalid')
   })
+  it('真实Provider生产入口只放行已验证的发热和咳嗽', async () => {
+    const fake = new FakeProvider()
+    const route = createLlmRouter({ config: config(), provider: fake, audit: quietAudit })
+    for (const complaint of ['headache', 'dizziness']) {
+      const result = await route(request(extractBody({
+        supportedComplaints: [complaint],
+        allowedSlotIds: [complaint === 'headache' ? 'headacheLocation' : 'dizzinessExperience'],
+        currentQuestionSlotId: null,
+      })))
+      expect(result.status).toBe(400)
+    }
+    expect(fake.extractCalls).toBe(0)
+    expect(() => sanitizeExtractRequest(extractBody({ supportedComplaints: ['fever'] }))).not.toThrow()
+    expect(() => sanitizeExtractRequest(extractBody({
+      supportedComplaints: ['cough'],
+      allowedSlotIds: ['onset'],
+      currentQuestionSlotId: 'onset',
+    }))).not.toThrow()
+  })
   it('超长userText被拒绝', () => {
     expect(() => sanitizeExtractRequest(extractBody({ userText: '发'.repeat(501) }))).toThrow('user_text_too_long')
   })
@@ -167,6 +186,7 @@ describe('Provider、严格响应和日志保护', () => {
     expect(result.structuredOutputStrategy).toBe('json_object_fallback')
     expect(String(fetchFn.mock.calls[0][0])).toBe('https://api.deepseek.com/v1/chat/completions')
     expect(provider.getStructuredOutputStats().strictToolRequestCount).toBe(0)
+    expect(JSON.parse(String((fetchFn.mock.calls[0][1] as RequestInit).body)).max_tokens).toBe(SLOT_EXTRACTION_MAX_TOKENS)
   })
   it('API Key只进入服务端Authorization而不进入请求体', async () => {
     const fetchFn = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(validExtract) } }], usage: {} }), { status: 200 }))

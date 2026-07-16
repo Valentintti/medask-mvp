@@ -5,7 +5,9 @@ import { buildSlotExtractionPrompt, SLOT_EXTRACTION_SYSTEM_PROMPT } from '../pro
 import type { ProviderUsage, ServerLlmProvider, ServerProviderResult } from '../types'
 
 const MAX_UPSTREAM_BODY_BYTES = 65_536
-const JSON_OUTPUT_MAX_TOKENS = 1_200
+// 推理 token 与最终 JSON 可能共用输出预算；复杂多槽位响应在 1,200 时会以 length 截断。
+// 仅提高槽位提取预算，改写问题仍沿用独立的较小上限。
+export const SLOT_EXTRACTION_MAX_TOKENS = 4_096
 const REWRITE_MAX_TOKENS = 600
 const EXTRACTION_TOOL_NAME = 'submit_slot_extraction'
 type FetchLike = typeof fetch
@@ -48,7 +50,7 @@ function usageFrom(value: unknown): ProviderUsage {
   return { inputTokens: number(record.prompt_tokens), outputTokens: number(record.completion_tokens), totalTokens: number(record.total_tokens) }
 }
 
-interface CompletionEnvelope { message: Record<string, unknown>; usage: ProviderUsage }
+interface CompletionEnvelope { message: Record<string, unknown>; usage: ProviderUsage; finishReason: string | null }
 function completionEnvelope(bodyText: string): CompletionEnvelope {
   try {
     const body = JSON.parse(bodyText) as Record<string, unknown>
@@ -56,24 +58,27 @@ function completionEnvelope(bodyText: string): CompletionEnvelope {
     if (!Array.isArray(choices) || choices.length !== 1) throw new Error('choices')
     const first = choices[0]
     if (typeof first !== 'object' || first === null || Array.isArray(first)) throw new Error('choice')
-    if ((first as Record<string, unknown>).finish_reason === 'length') throw new ProviderRequestError('truncated_output', 502)
+    const finishReason = typeof (first as Record<string, unknown>).finish_reason === 'string'
+      ? String((first as Record<string, unknown>).finish_reason)
+      : null
+    if (finishReason === 'length') throw new ProviderRequestError('truncated_output', 502)
     const message = (first as Record<string, unknown>).message
     if (typeof message !== 'object' || message === null || Array.isArray(message)) throw new Error('message')
-    return { message: message as Record<string, unknown>, usage: usageFrom(body.usage) }
+    return { message: message as Record<string, unknown>, usage: usageFrom(body.usage), finishReason }
   } catch (error) {
     if (error instanceof ProviderRequestError) throw error
     throw new ProviderRequestError('provider_response_invalid', 502)
   }
 }
 
-function extractJsonContent(bodyText: string): { rawJson: string; usage: ProviderUsage } {
+function extractJsonContent(bodyText: string): { rawJson: string; usage: ProviderUsage; finishReason: string | null } {
   const envelope = completionEnvelope(bodyText)
   const content = envelope.message.content
   if (typeof content !== 'string' || !content.trim()) throw new ProviderRequestError('empty_content', 502)
-  return { rawJson: content, usage: envelope.usage }
+  return { rawJson: content, usage: envelope.usage, finishReason: envelope.finishReason }
 }
 
-function extractStrictToolArguments(bodyText: string): { rawJson: string; usage: ProviderUsage } {
+function extractStrictToolArguments(bodyText: string): { rawJson: string; usage: ProviderUsage; finishReason: string | null } {
   const envelope = completionEnvelope(bodyText)
   const toolCalls = envelope.message.tool_calls
   if (!Array.isArray(toolCalls) || toolCalls.length !== 1) throw new ProviderRequestError('tool_call_missing', 502)
@@ -85,7 +90,7 @@ function extractStrictToolArguments(bodyText: string): { rawJson: string; usage:
   if (functionRecord.name !== EXTRACTION_TOOL_NAME || typeof functionRecord.arguments !== 'string' || !functionRecord.arguments.trim()) {
     throw new ProviderRequestError('tool_call_missing', 502)
   }
-  return { rawJson: functionRecord.arguments, usage: envelope.usage }
+  return { rawJson: functionRecord.arguments, usage: envelope.usage, finishReason: envelope.finishReason }
 }
 
 async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
@@ -157,7 +162,7 @@ function strictToolRequestBody(model: string, systemPrompt: string, userPrompt: 
     }],
     tool_choice: { type: 'function', function: { name: EXTRACTION_TOOL_NAME } },
     temperature: 0,
-    max_tokens: JSON_OUTPUT_MAX_TOKENS,
+    max_tokens: SLOT_EXTRACTION_MAX_TOKENS,
   })
 }
 
@@ -212,7 +217,7 @@ export class OpenAiCompatibleProvider implements ServerLlmProvider {
           )
           const extracted = extractStrictToolArguments(completion.bodyText)
           this.strictCapability = 'supported'
-          return this.result(extracted.rawJson, extracted.usage, completion.status, SLOT_EXTRACTION_SYSTEM_PROMPT, buildSlotExtractionPrompt(input), 'deepseek_strict_tool')
+          return this.result(extracted.rawJson, extracted.usage, completion.status, SLOT_EXTRACTION_SYSTEM_PROMPT, buildSlotExtractionPrompt(input), 'deepseek_strict_tool', extracted.finishReason)
         } catch (error) {
           if (!canFallbackFromStrict(error)) throw error
           const reason = error instanceof ProviderRequestError ? error.code : 'unknown'
@@ -225,12 +230,12 @@ export class OpenAiCompatibleProvider implements ServerLlmProvider {
       const userPrompt = buildSlotExtractionPrompt(input)
       const completion = await this.requestCompletion(
         completionEndpoint(this.options.baseUrl),
-        jsonObjectRequestBody(this.options.model, SLOT_EXTRACTION_SYSTEM_PROMPT, userPrompt, JSON_OUTPUT_MAX_TOKENS, true),
+        jsonObjectRequestBody(this.options.model, SLOT_EXTRACTION_SYSTEM_PROMPT, userPrompt, SLOT_EXTRACTION_MAX_TOKENS, true),
         requestSignal,
         deadline,
       )
       const extracted = extractJsonContent(completion.bodyText)
-      return this.result(extracted.rawJson, extracted.usage, completion.status, SLOT_EXTRACTION_SYSTEM_PROMPT, userPrompt, 'json_object_fallback')
+      return this.result(extracted.rawJson, extracted.usage, completion.status, SLOT_EXTRACTION_SYSTEM_PROMPT, userPrompt, 'json_object_fallback', extracted.finishReason)
     })
   }
 
@@ -244,7 +249,7 @@ export class OpenAiCompatibleProvider implements ServerLlmProvider {
         deadline,
       )
       const extracted = extractJsonContent(completion.bodyText)
-      return this.result(extracted.rawJson, extracted.usage, completion.status, QUESTION_REWRITE_SYSTEM_PROMPT, userPrompt, 'question_rewrite_json_object')
+      return this.result(extracted.rawJson, extracted.usage, completion.status, QUESTION_REWRITE_SYSTEM_PROMPT, userPrompt, 'question_rewrite_json_object', extracted.finishReason)
     })
   }
 
@@ -255,6 +260,7 @@ export class OpenAiCompatibleProvider implements ServerLlmProvider {
     systemPrompt: string,
     userPrompt: string,
     structuredOutputStrategy: ServerProviderResult['structuredOutputStrategy'],
+    finishReason: string | null,
   ): ServerProviderResult {
     return {
       rawJson,
@@ -262,6 +268,7 @@ export class OpenAiCompatibleProvider implements ServerLlmProvider {
       outputCharacters: rawJson.length,
       usage,
       upstreamStatus,
+      finishReason,
       structuredOutputStrategy,
     }
   }

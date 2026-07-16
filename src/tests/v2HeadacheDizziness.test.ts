@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { complaintRules } from '../data/complaintRules'
 import { detectComplaintCurrentStatus, detectComplaints } from '../engines/complaintEngine'
 import { checkTextRisk } from '../engines/riskEngine'
 import { getSessionSlots, reconcileConditionalSlots } from '../engines/slotEngine'
@@ -263,8 +264,10 @@ describe('V2 Mock Provider 与合成评测', () => {
     ]).toEqual([0, 0, 0, 0, 0])
   })
 
-  it('服务端白名单接受头痛和头晕槽位', () => {
-    const request = sanitizeExtractRequest(JSON.stringify({
+  it('规则版保留头痛头晕，但真实Provider生产白名单不放行', () => {
+    expect(complaintRules.headache.slots.some((slot) => slot.id === 'headacheLocation')).toBe(true)
+    expect(complaintRules.dizziness.slots.some((slot) => slot.id === 'dizzinessExperience')).toBe(true)
+    expect(() => sanitizeExtractRequest(JSON.stringify({
       supportedComplaints: ['headache', 'dizziness'],
       allowedSlotIds: ['headacheLocation', 'dizzinessExperience'],
       currentQuestionSlotId: 'headacheLocation',
@@ -272,8 +275,7 @@ describe('V2 Mock Provider 与合成评测', () => {
       existingSlotIds: [],
       locale: 'zh-CN',
       schemaVersion: LLM_SCHEMA_VERSION,
-    }))
-    expect(request.supportedComplaints).toEqual(['headache', 'dizziness'])
+    }))).toThrow('request_values_invalid')
   })
 
   it('服务端白名单仍拒绝腹痛和胸部不适主诉', () => {

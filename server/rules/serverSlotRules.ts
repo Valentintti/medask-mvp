@@ -4,11 +4,16 @@ import type { QuestionRewriteRequest, SlotExtractionRequest } from '../../src/ll
 import type { ComplaintId, SlotDefinition } from '../../src/types/intake'
 import { RequestValidationError } from '../security/errors'
 
-export const SERVER_COMPLAINT_IDS = new Set<ComplaintId>(['fever', 'cough', 'headache', 'dizziness'])
+// 真实 Provider 的生产放行范围。规则版可以支持更多主诉，但未通过真实 Provider
+// 产品质量门槛的主诉不得加入这里。
+export const SERVER_COMPLAINT_IDS = new Set<ComplaintId>(['fever', 'cough'])
 
 export function trustedSlotsForComplaints(complaints: readonly ComplaintId[]): Map<string, SlotDefinition> {
   const trusted = new Map<string, SlotDefinition>()
   for (const complaint of complaints) {
+    if (!SERVER_COMPLAINT_IDS.has(complaint)) {
+      throw new RequestValidationError('complaint_not_enabled_for_real_provider')
+    }
     for (const slot of complaintRules[complaint].slots) trusted.set(slot.id, slot)
   }
   return trusted
