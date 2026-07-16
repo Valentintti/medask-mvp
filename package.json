@@ -19,7 +19,9 @@
     "eval:v2:real": "tsx scripts/evaluate-v2-real-provider.ts",
     "eval:v2": "tsx scripts/evaluate-v2-complaints.ts",
     "prepare:abdominal-review": "node scripts/prepare-abdominal-pain-review.mjs",
-    "eval:abdominal-review": "node scripts/evaluate-abdominal-pain-review.mjs"
+    "eval:abdominal-review": "node scripts/evaluate-abdominal-pain-review.mjs",
+    "prepare:abdominal-adjudication": "node scripts/prepare-abdominal-pain-adjudication.mjs",
+    "eval:abdominal-adjudication": "node scripts/evaluate-abdominal-pain-adjudication.mjs"
   },
   "dependencies": {
     "react": "^19.1.1",

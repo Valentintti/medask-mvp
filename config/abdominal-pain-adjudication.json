@@ -1,0 +1,35 @@
+{
+  "sourceCsv": "reports/abdominal-pain-targeted-review.csv",
+  "sourceSha256": "3c0a677b3b18806113ef7d4fcab3b121b3dddd03aaf1df0f03016c4a928acf80",
+  "outputCsv": "reports/abdominal-pain-targeted-adjudication.csv",
+  "reviewIds": [
+    "ABD-TARGET-001",
+    "ABD-TARGET-002",
+    "ABD-TARGET-007",
+    "ABD-TARGET-008",
+    "ABD-TARGET-011",
+    "ABD-TARGET-012",
+    "ABD-TARGET-016"
+  ],
+  "secondRoundFields": [
+    "human_candidate_current",
+    "human_candidate_status",
+    "human_candidate_complaints",
+    "human_candidate_intent",
+    "human_risk_present",
+    "human_risk_scope",
+    "human_risk_category",
+    "human_adjudication_notes"
+  ],
+  "finalFields": [
+    "final_candidate_current",
+    "final_candidate_status",
+    "final_complaints",
+    "final_intent",
+    "final_risk_present",
+    "final_risk_scope",
+    "final_risk_category",
+    "final_reason_category",
+    "final_notes"
+  ]
+}
