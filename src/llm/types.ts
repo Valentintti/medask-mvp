@@ -5,7 +5,15 @@ import type {
   SlotDefinition,
 } from '../types/intake'
 
-export type CandidateStatus = 'asserted' | 'negated' | 'uncertain'
+export const LLM_SCHEMA_VERSION = '1.1' as const
+export type LlmSchemaVersion = typeof LLM_SCHEMA_VERSION
+export type CandidateStatus =
+  | 'asserted'
+  | 'negated'
+  | 'uncertain'
+  | 'historical'
+  | 'resolved'
+  | 'hypothetical'
 export type LlmOperation = 'slot_extraction' | 'question_rewrite'
 export type LlmOutcome = 'accepted' | 'clarification' | 'rejected' | 'fallback' | 'risk_blocked'
 
@@ -16,7 +24,7 @@ export interface SlotExtractionRequest {
   userText: string
   existingSlotIds: string[]
   locale: 'zh-CN'
-  schemaVersion: '1.0'
+  schemaVersion: LlmSchemaVersion
 }
 
 export interface SlotCandidate {
@@ -28,22 +36,27 @@ export interface SlotCandidate {
 }
 
 export interface SlotExtractionResponse {
-  schemaVersion: '1.0'
+  schemaVersion: LlmSchemaVersion
   candidates: SlotCandidate[]
-  unresolved: string[]
+  unresolvedSlotIds: string[]
   needsClarification: boolean
 }
 
 export type SlotExtractionRawResponse = unknown
 
 export interface QuestionRewriteRequest {
+  schemaVersion: LlmSchemaVersion
   slotId: string
   canonicalQuestion: string
   complaintContext: ComplaintId[]
+  required: boolean
+  inputType: SlotDefinition['inputType']
+  unit?: string
   locale: 'zh-CN'
 }
 
 export interface QuestionRewriteResponse {
+  schemaVersion: LlmSchemaVersion
   rewrittenQuestion: string
   confidence: number
 }
@@ -52,8 +65,8 @@ export type QuestionRewriteRawResponse = unknown
 
 export interface LlmProvider {
   readonly name: string
-  extractSlots(input: SlotExtractionRequest): Promise<SlotExtractionRawResponse>
-  rewriteQuestion(input: QuestionRewriteRequest): Promise<QuestionRewriteRawResponse>
+  extractSlots(input: SlotExtractionRequest, signal?: AbortSignal): Promise<SlotExtractionRawResponse>
+  rewriteQuestion(input: QuestionRewriteRequest, signal?: AbortSignal): Promise<QuestionRewriteRawResponse>
 }
 
 export type CandidateRejectionReason =
@@ -66,14 +79,21 @@ export type CandidateRejectionReason =
   | 'value_invalid'
   | 'confidence_low'
   | 'status_not_asserted'
+  | 'candidate_negated'
+  | 'candidate_uncertain'
   | 'evidence_missing'
   | 'evidence_hallucinated'
   | 'negation_conflict'
+  | 'historical_context'
+  | 'resolved_context'
+  | 'hypothetical_context'
   | 'risk_slot_blocked'
   | 'risk_evidence_detected'
+  | 'already_answered_same_value'
   | 'existing_value_conflict'
   | 'provider_error'
   | 'provider_timeout'
+  | 'provider_aborted'
   | 'rewrite_invalid'
   | 'rewrite_policy_violation'
   | 'rewrite_meaning_changed'

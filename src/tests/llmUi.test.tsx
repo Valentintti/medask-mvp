@@ -32,13 +32,14 @@ describe('开发模式Mock适配器页面', () => {
     expect(await screen.findByText(/请再明确描述“呼吸困难”/u)).toBeInTheDocument()
   })
 
-  it('模型改写模式只替换显示问题，不改变当前槽位', async () => {
+  it('风险问题保持标准措辞且不交给模型改写', async () => {
     const user = userEvent.setup()
     render(<App />)
     await user.click(screen.getByLabelText('使用模型改写问题'))
     await user.click(screen.getByRole('button', { name: '发热快速入口' }))
-    expect(await screen.findByRole('heading', { name: '现在有没有明显呼吸困难？' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '现在是否有明显呼吸困难、喘不上气或呼吸非常费力？' })).toBeInTheDocument()
     expect(screen.getByText('呼吸困难')).toBeInTheDocument()
+    expect(await screen.findByText('risk_blocked')).toBeInTheDocument()
   })
 
   it('标准问题模式保持原始canonicalQuestion', async () => {

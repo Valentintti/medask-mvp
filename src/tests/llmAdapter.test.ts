@@ -10,7 +10,8 @@ import { createIntakeSession } from '../harness/sessionState'
 import { runSlotExtractionEval } from '../llm/evals/evaluate'
 import { slotExtractionCases } from '../llm/evals/slotExtractionCases'
 import { MockLlmProvider } from '../llm/mockProvider'
-import type { LlmProvider, SlotExtractionRequest } from '../llm/types'
+import type { LlmProvider, QuestionRewriteRequest, SlotExtractionRequest } from '../llm/types'
+import { LLM_SCHEMA_VERSION } from '../llm/types'
 import { QuestionRewriteAdapter } from '../llm/questionRewriteAdapter'
 import { parseSlotExtractionResponse } from '../llm/schema'
 import { SlotExtractionAdapter } from '../llm/slotExtractionAdapter'
@@ -33,15 +34,37 @@ function extractionContext(complaint: 'fever' | 'cough' = 'fever') {
   }
 }
 
+function rewriteInput(
+  canonicalQuestion = '这些不适大约从什么时候开始？',
+  overrides: Partial<QuestionRewriteRequest> = {},
+): QuestionRewriteRequest {
+  return {
+    schemaVersion: LLM_SCHEMA_VERSION,
+    slotId: 'onset',
+    canonicalQuestion,
+    complaintContext: ['fever'],
+    required: true,
+    inputType: 'text',
+    locale: 'zh-CN',
+    ...overrides,
+  }
+}
+
+const rewriteResponse = (rewrittenQuestion: string, confidence = 0.99) => ({
+  schemaVersion: LLM_SCHEMA_VERSION,
+  rewrittenQuestion,
+  confidence,
+})
+
 describe('Provider、Schema 与接受策略', () => {
   it('Provider接口可以替换', async () => {
     const provider: LlmProvider = {
       name: 'replaceable-provider',
       async extractSlots(_input: SlotExtractionRequest) {
-        return { schemaVersion: '1.0', candidates: [], unresolved: [], needsClarification: false }
+        return { schemaVersion: '1.1', candidates: [], unresolvedSlotIds: [], needsClarification: false }
       },
       async rewriteQuestion(input) {
-        return { rewrittenQuestion: input.canonicalQuestion, confidence: 1 }
+        return rewriteResponse(input.canonicalQuestion, 1)
       },
     }
     const result = await new SlotExtractionAdapter(provider).extract(extractionContext().input)
@@ -71,7 +94,7 @@ describe('Provider、Schema 与接受策略', () => {
   })
 
   it('候选中的多余字段也被拒绝', () => {
-    const raw = { schemaVersion: '1.0', candidates: [{ slotId: 'onset', value: '昨天', confidence: .9, evidence: '昨天', status: 'asserted', diagnosis: '禁止' }], unresolved: [], needsClarification: false }
+    const raw = { schemaVersion: '1.1', candidates: [{ slotId: 'onset', value: '昨天', confidence: .9, evidence: '昨天', status: 'asserted', diagnosis: '禁止' }], unresolvedSlotIds: [], needsClarification: false }
     expect(parseSlotExtractionResponse(raw).reason).toBe('extra_field')
   })
 
@@ -108,13 +131,13 @@ describe('Provider、Schema 与接受策略', () => {
     const context = extractionContext('cough')
     context.input.userText = '可能有点发烧吧'
     const result = await new SlotExtractionAdapter(new MockLlmProvider(), { confidenceThreshold: .5 }).extract(context.input)
-    expect(result.rejectedCandidates[0].reason).toBe('status_not_asserted')
+    expect(result.rejectedCandidates[0].reason).toBe('candidate_uncertain')
   })
 
   it('否定表达不被asserted接受', async () => {
     const context = extractionContext('cough')
     context.input.userText = '没有发热'
-    const provider = new MockLlmProvider({ responses: { '没有发热': { schemaVersion: '1.0', candidates: [{ slotId: 'feverAssociated', value: true, confidence: .99, evidence: '没有发热', status: 'asserted' }], unresolved: [], needsClarification: false } } })
+    const provider = new MockLlmProvider({ responses: { '没有发热': { schemaVersion: '1.1', candidates: [{ slotId: 'feverAssociated', value: true, confidence: .99, evidence: '没有发热', status: 'asserted' }], unresolvedSlotIds: [], needsClarification: false } } })
     const result = await new SlotExtractionAdapter(provider).extract(context.input)
     expect(result.rejectedCandidates[0].reason).toBe('negation_conflict')
   })
@@ -130,7 +153,7 @@ describe('Provider、Schema 与接受策略', () => {
   it('候选值含风险表达时再次交给riskEngine并拒绝', async () => {
     const context = extractionContext()
     context.input.userText = '今天有变化'
-    const provider = new MockLlmProvider({ responses: { '今天有变化': { schemaVersion: '1.0', candidates: [{ slotId: 'onset', value: '胸痛', confidence: .99, evidence: '今天', status: 'asserted' }], unresolved: [], needsClarification: false } } })
+    const provider = new MockLlmProvider({ responses: { '今天有变化': { schemaVersion: '1.1', candidates: [{ slotId: 'onset', value: '胸痛', confidence: .99, evidence: '今天', status: 'asserted' }], unresolvedSlotIds: [], needsClarification: false } } })
     const result = await new SlotExtractionAdapter(provider).extract(context.input)
     expect(result.rejectedCandidates[0].reason).toBe('risk_evidence_detected')
   })
@@ -158,7 +181,7 @@ describe('风险顺序、冲突与失败回退', () => {
   })
 
   it('风险引擎先于模型调用并且模型不能取消升级', async () => {
-    const provider = new MockLlmProvider({ responses: { '现在胸痛': { schemaVersion: '1.0', candidates: [], unresolved: [], needsClarification: false } } })
+    const provider = new MockLlmProvider({ responses: { '现在胸痛': { schemaVersion: '1.1', candidates: [], unresolvedSlotIds: [], needsClarification: false } } })
     const base = startSession({ age: 30, quickComplaint: 'fever' })
     const result = await answerFreeText(base.session, '现在胸痛', new SlotExtractionAdapter(provider))
     expect(result.session.status).toBe('escalated')
@@ -169,7 +192,7 @@ describe('风险顺序、冲突与失败回退', () => {
   it('已有答案冲突生成固定澄清问题且不覆盖', async () => {
     const base = startSession({ age: 30, quickComplaint: 'fever' })
     base.session.answers.currentTemperature = 38.5
-    const provider = new MockLlmProvider({ responses: { '现在已经37度': { schemaVersion: '1.0', candidates: [{ slotId: 'currentTemperature', value: 37, confidence: .99, evidence: '37度', status: 'asserted' }], unresolved: [], needsClarification: false } } })
+    const provider = new MockLlmProvider({ responses: { '现在已经37度': { schemaVersion: '1.1', candidates: [{ slotId: 'currentTemperature', value: 37, confidence: .99, evidence: '37度', status: 'asserted' }], unresolvedSlotIds: [], needsClarification: false } } })
     const result = await answerFreeText(base.session, '现在已经37度', new SlotExtractionAdapter(provider))
     expect(result.session.answers.currentTemperature).toBe(38.5)
     expect(result.clarificationQuestion).toBe('你之前提供的是38.5℃，现在提到37℃。请确认当前体温是多少？')
@@ -217,7 +240,7 @@ describe('风险顺序、冲突与失败回退', () => {
 
 describe('问题改写与非敏感Trace', () => {
   it('合法问题改写保留同一slotId', async () => {
-    const result = await new QuestionRewriteAdapter(new MockLlmProvider()).rewrite({ slotId: 'onset', canonicalQuestion: '这些不适大约从什么时候开始？', complaintContext: ['fever'], locale: 'zh-CN' })
+    const result = await new QuestionRewriteAdapter(new MockLlmProvider()).rewrite(rewriteInput())
     expect(result.slotId).toBe('onset')
     expect(result.usedRewrite).toBe(true)
   })
@@ -227,37 +250,42 @@ describe('问题改写与非敏感Trace', () => {
     session.chiefComplaints = ['fever']
     const original = getSessionSlots(session).find((slot) => slot.id === 'onset')!
     const snapshot = structuredClone(original)
-    await new QuestionRewriteAdapter(new MockLlmProvider()).rewrite({ slotId: original.id, canonicalQuestion: original.question, complaintContext: ['fever'], locale: 'zh-CN' })
+    await new QuestionRewriteAdapter(new MockLlmProvider()).rewrite(rewriteInput(original.question, {
+      slotId: original.id,
+      required: original.required,
+      inputType: original.inputType,
+      unit: original.unit,
+    }))
     expect(original).toEqual(snapshot)
   })
 
   it('非法改写回退标准问题', async () => {
-    const provider = new MockLlmProvider({ rewriteResponses: { onset: { rewrittenQuestion: '', confidence: .99 } } })
+    const provider = new MockLlmProvider({ rewriteResponses: { onset: rewriteResponse('') } })
     const canonical = '这些不适大约从什么时候开始？'
-    const result = await new QuestionRewriteAdapter(provider).rewrite({ slotId: 'onset', canonicalQuestion: canonical, complaintContext: ['fever'], locale: 'zh-CN' })
+    const result = await new QuestionRewriteAdapter(provider).rewrite(rewriteInput(canonical))
     expect(result.question).toBe(canonical)
     expect(result.usedRewrite).toBe(false)
   })
 
   it('增加新医学问题的改写被拒绝', async () => {
-    const provider = new MockLlmProvider({ rewriteResponses: { onset: { rewrittenQuestion: '什么时候开始，同时有没有胸痛？', confidence: .99 } } })
+    const provider = new MockLlmProvider({ rewriteResponses: { onset: rewriteResponse('什么时候开始，同时有没有胸痛？') } })
     const canonical = '这些不适大约从什么时候开始？'
-    const result = await new QuestionRewriteAdapter(provider).rewrite({ slotId: 'onset', canonicalQuestion: canonical, complaintContext: ['fever'], locale: 'zh-CN' })
+    const result = await new QuestionRewriteAdapter(provider).rewrite(rewriteInput(canonical))
     expect(result.question).toBe(canonical)
     expect(result.trace.rejectionReasons).toContain('rewrite_meaning_changed')
   })
 
   it('诊断式改写被policyGuard拒绝', async () => {
-    const provider = new MockLlmProvider({ rewriteResponses: { onset: { rewrittenQuestion: '什么时候开始？你诊断为肺炎。', confidence: .99 } } })
+    const provider = new MockLlmProvider({ rewriteResponses: { onset: rewriteResponse('什么时候开始？你诊断为肺炎。') } })
     const canonical = '这些不适大约从什么时候开始？'
-    const result = await new QuestionRewriteAdapter(provider).rewrite({ slotId: 'onset', canonicalQuestion: canonical, complaintContext: ['fever'], locale: 'zh-CN' })
+    const result = await new QuestionRewriteAdapter(provider).rewrite(rewriteInput(canonical))
     expect(result.question).toBe(canonical)
     expect(result.trace.rejectionReasons).toContain('rewrite_policy_violation')
   })
 
   it('LLM Trace不记录用户原文、evidence或API Key', async () => {
     const base = startSession({ age: 30, quickComplaint: 'fever' })
-    const result = await answerFreeText(base.session, '我昨天开始发烧 API_KEY_SECRET', new SlotExtractionAdapter(new MockLlmProvider({ responses: { '我昨天开始发烧 API_KEY_SECRET': { schemaVersion: '1.0', candidates: [{ slotId: 'onset', value: '昨天', confidence: .99, evidence: '昨天开始', status: 'asserted' }], unresolved: [], needsClarification: false } } })))
+    const result = await answerFreeText(base.session, '我昨天开始发烧 API_KEY_SECRET', new SlotExtractionAdapter(new MockLlmProvider({ responses: { '我昨天开始发烧 API_KEY_SECRET': { schemaVersion: '1.1', candidates: [{ slotId: 'onset', value: '昨天', confidence: .99, evidence: '昨天开始', status: 'asserted' }], unresolvedSlotIds: [], needsClarification: false } } })))
     const serialized = JSON.stringify(result.session.llmTraceEvents)
     expect(serialized).not.toContain('我昨天开始发烧')
     expect(serialized).not.toContain('昨天开始')

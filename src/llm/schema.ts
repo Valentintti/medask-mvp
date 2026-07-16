@@ -4,6 +4,7 @@ import type {
   SlotCandidate,
   SlotExtractionResponse,
 } from './types'
+import { LLM_SCHEMA_VERSION } from './types'
 
 export interface SchemaResult<T> {
   valid: boolean
@@ -46,31 +47,41 @@ function parseCandidate(raw: unknown): SchemaResult<SlotCandidate> {
     typeof raw.evidence !== 'string' ||
     !raw.evidence ||
     raw.evidence.length > 80 ||
-    !['asserted', 'negated', 'uncertain'].includes(String(raw.status))
+    !['asserted', 'negated', 'uncertain', 'historical', 'resolved', 'hypothetical'].includes(String(raw.status))
   ) {
     return { valid: false, value: null, reason: 'schema_invalid' }
   }
   return { valid: true, value: raw as unknown as SlotCandidate, reason: null }
 }
 
-export function parseSlotExtractionResponse(raw: unknown): SchemaResult<SlotExtractionResponse> {
+export function parseSlotExtractionResponse(
+  raw: unknown,
+  allowedSlotIds?: readonly string[],
+): SchemaResult<SlotExtractionResponse> {
   const parsed = parseJson(raw)
   if (!parsed.valid || !isRecord(parsed.value)) {
     return { valid: false, value: null, reason: parsed.reason ?? 'schema_invalid' }
   }
-  if (!hasExactKeys(parsed.value, ['schemaVersion', 'candidates', 'unresolved', 'needsClarification'])) {
+  if (!hasExactKeys(parsed.value, ['schemaVersion', 'candidates', 'unresolvedSlotIds', 'needsClarification'])) {
     return { valid: false, value: null, reason: 'extra_field' }
   }
-  if (parsed.value.schemaVersion !== '1.0') {
+  if (parsed.value.schemaVersion !== LLM_SCHEMA_VERSION) {
     return { valid: false, value: null, reason: 'schema_version_mismatch' }
   }
   if (
     !Array.isArray(parsed.value.candidates) ||
-    !Array.isArray(parsed.value.unresolved) ||
-    !parsed.value.unresolved.every((item) => typeof item === 'string') ||
+    !Array.isArray(parsed.value.unresolvedSlotIds) ||
+    !parsed.value.unresolvedSlotIds.every((item) => typeof item === 'string' && item.length > 0) ||
     typeof parsed.value.needsClarification !== 'boolean'
   ) {
     return { valid: false, value: null, reason: 'schema_invalid' }
+  }
+
+  if (
+    allowedSlotIds &&
+    parsed.value.unresolvedSlotIds.some((slotId) => !allowedSlotIds.includes(String(slotId)))
+  ) {
+    return { valid: false, value: null, reason: 'slot_not_allowed' }
   }
 
   const candidates: SlotCandidate[] = []
@@ -85,9 +96,9 @@ export function parseSlotExtractionResponse(raw: unknown): SchemaResult<SlotExtr
   return {
     valid: true,
     value: {
-      schemaVersion: '1.0',
+      schemaVersion: LLM_SCHEMA_VERSION,
       candidates,
-      unresolved: parsed.value.unresolved as string[],
+      unresolvedSlotIds: parsed.value.unresolvedSlotIds as string[],
       needsClarification: parsed.value.needsClarification,
     },
     reason: null,
@@ -99,10 +110,11 @@ export function parseQuestionRewriteResponse(raw: unknown): SchemaResult<Questio
   if (!parsed.valid || !isRecord(parsed.value)) {
     return { valid: false, value: null, reason: parsed.reason ?? 'rewrite_invalid' }
   }
-  if (!hasExactKeys(parsed.value, ['rewrittenQuestion', 'confidence'])) {
+  if (!hasExactKeys(parsed.value, ['schemaVersion', 'rewrittenQuestion', 'confidence'])) {
     return { valid: false, value: null, reason: 'extra_field' }
   }
   if (
+    parsed.value.schemaVersion !== LLM_SCHEMA_VERSION ||
     typeof parsed.value.rewrittenQuestion !== 'string' ||
     !parsed.value.rewrittenQuestion.trim() ||
     parsed.value.rewrittenQuestion.length > 120 ||
@@ -116,6 +128,7 @@ export function parseQuestionRewriteResponse(raw: unknown): SchemaResult<Questio
   return {
     valid: true,
     value: {
+      schemaVersion: LLM_SCHEMA_VERSION,
       rewrittenQuestion: parsed.value.rewrittenQuestion,
       confidence: parsed.value.confidence,
     },

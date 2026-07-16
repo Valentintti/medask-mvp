@@ -15,6 +15,14 @@ export interface OutputValidationResult {
   conflicts: SlotConflict[]
 }
 
+function normalizeCandidateValue(candidate: SlotCandidate, slot: SlotDefinition): SlotCandidate {
+  if (slot.inputType !== 'number' || typeof candidate.value !== 'string') return candidate
+  const text = candidate.value.trim()
+  if (!/^-?(?:\d+\.?\d*|\.\d+)$/u.test(text)) return candidate
+  const numeric = Number(text)
+  return Number.isFinite(numeric) ? { ...candidate, value: numeric } : candidate
+}
+
 export function validateExtractionOutput(input: {
   response: SlotExtractionResponse
   allowedSlots: SlotDefinition[]
@@ -34,19 +42,21 @@ export function validateExtractionOutput(input: {
       continue
     }
 
+    const normalizedCandidate = normalizeCandidateValue(candidate, slot)
+
     const policyReason = evaluateCandidateAcceptance({
-      candidate,
+      candidate: normalizedCandidate,
       slot,
       userText: input.userText,
-      existingValue: input.existingAnswers[candidate.slotId],
+      existingValue: input.existingAnswers[normalizedCandidate.slotId],
       threshold: input.threshold,
     })
     if (policyReason === 'existing_value_conflict') {
       conflicts.push({
-        slotId: candidate.slotId,
-        existingValue: input.existingAnswers[candidate.slotId],
-        proposedValue: candidate.value,
-        evidence: candidate.evidence,
+        slotId: normalizedCandidate.slotId,
+        existingValue: input.existingAnswers[normalizedCandidate.slotId],
+        proposedValue: normalizedCandidate.value,
+        evidence: normalizedCandidate.evidence,
       })
       rejectedCandidates.push({ slotId: candidate.slotId, reason: policyReason })
       continue
@@ -56,21 +66,21 @@ export function validateExtractionOutput(input: {
       continue
     }
 
-    if (!validateSlotAnswer(slot, candidate.value).valid) {
+    if (!validateSlotAnswer(slot, normalizedCandidate.value).valid) {
       rejectedCandidates.push({ slotId: candidate.slotId, reason: 'value_invalid' })
       continue
     }
 
     const candidateValueText =
-      typeof candidate.value === 'string' || typeof candidate.value === 'number'
-        ? String(candidate.value)
+      typeof normalizedCandidate.value === 'string' || typeof normalizedCandidate.value === 'number'
+        ? String(normalizedCandidate.value)
         : ''
-    if (checkTextRisk(candidate.evidence).matched || checkTextRisk(candidateValueText).matched) {
+    if (checkTextRisk(normalizedCandidate.evidence).matched || checkTextRisk(candidateValueText).matched) {
       rejectedCandidates.push({ slotId: candidate.slotId, reason: 'risk_evidence_detected' })
       continue
     }
 
-    acceptedCandidates.push(candidate)
+    acceptedCandidates.push(normalizedCandidate)
   }
 
   return { acceptedCandidates, rejectedCandidates, conflicts }

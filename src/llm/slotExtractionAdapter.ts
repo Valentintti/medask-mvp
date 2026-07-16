@@ -10,6 +10,7 @@ import type {
   LlmProvider,
   SlotExtractionRequest,
 } from './types'
+import { LLM_SCHEMA_VERSION } from './types'
 
 export interface SlotExtractionAdapterOptions {
   timeoutMs?: number
@@ -22,7 +23,7 @@ export class SlotExtractionAdapter {
     private readonly options: SlotExtractionAdapterOptions = {},
   ) {}
 
-  async extract(input: ExtractionAdapterInput): Promise<ExtractionAdapterResult> {
+  async extract(input: ExtractionAdapterInput, signal?: AbortSignal): Promise<ExtractionAdapterResult> {
     const startedAt = Date.now()
     const request: SlotExtractionRequest = {
       supportedComplaints: [...input.supportedComplaints],
@@ -31,24 +32,27 @@ export class SlotExtractionAdapter {
       userText: input.userText,
       existingSlotIds: Object.keys(input.existingAnswers),
       locale: 'zh-CN',
-      schemaVersion: '1.0',
+      schemaVersion: LLM_SCHEMA_VERSION,
     }
 
     let raw: unknown
     try {
       raw = await withProviderTimeout(
-        this.provider.extractSlots(request),
+        (providerSignal) => this.provider.extractSlots(request, providerSignal),
         this.options.timeoutMs ?? DEFAULT_LLM_TIMEOUT_MS,
+        signal,
       )
     } catch (error) {
       const reason: CandidateRejectionReason =
         error instanceof Error && error.message === 'provider_timeout'
           ? 'provider_timeout'
-          : 'provider_error'
+          : error instanceof Error && error.message === 'provider_aborted'
+            ? 'provider_aborted'
+            : 'provider_error'
       return this.fallbackResult(startedAt, reason)
     }
 
-    const schema = parseSlotExtractionResponse(raw)
+    const schema = parseSlotExtractionResponse(raw, request.allowedSlotIds)
     if (!schema.valid || !schema.value) {
       return this.fallbackResult(startedAt, schema.reason ?? 'schema_invalid')
     }
@@ -60,10 +64,14 @@ export class SlotExtractionAdapter {
       existingAnswers: input.existingAnswers,
       threshold: this.options.confidenceThreshold,
     })
+    const actionableRejections = validated.rejectedCandidates.filter(
+      (item) => item.reason !== 'already_answered_same_value',
+    )
     const needsClarification =
       schema.value.needsClarification ||
       validated.conflicts.length > 0 ||
-      (validated.acceptedCandidates.length === 0 && validated.rejectedCandidates.length > 0)
+      schema.value.unresolvedSlotIds.length > 0 ||
+      (validated.acceptedCandidates.length === 0 && actionableRejections.length > 0)
     const outcome = validated.acceptedCandidates.length
       ? 'accepted'
       : needsClarification
@@ -77,7 +85,7 @@ export class SlotExtractionAdapter {
       trace: createLlmTrace({
         providerName: this.provider.name,
         operation: 'slot_extraction',
-        schemaVersion: '1.0',
+        schemaVersion: LLM_SCHEMA_VERSION,
         startedAt,
         outcome,
         acceptedCandidateCount: validated.acceptedCandidates.length,
@@ -101,7 +109,7 @@ export class SlotExtractionAdapter {
       trace: createLlmTrace({
         providerName: this.provider.name,
         operation: 'slot_extraction',
-        schemaVersion: '1.0',
+        schemaVersion: LLM_SCHEMA_VERSION,
         startedAt,
         outcome: 'fallback',
         rejectedCandidateCount: 1,

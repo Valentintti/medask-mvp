@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { SafetyBanner } from './components/SafetyBanner'
 import { TracePanel } from './components/TracePanel'
 import {
@@ -13,6 +13,7 @@ import { appendLlmTrace } from './llm/llmTrace'
 import { MockLlmProvider } from './llm/mockProvider'
 import { QuestionRewriteAdapter } from './llm/questionRewriteAdapter'
 import { SlotExtractionAdapter } from './llm/slotExtractionAdapter'
+import { LLM_SCHEMA_VERSION } from './llm/types'
 import { EscalationPage } from './pages/EscalationPage'
 import { IntakePage } from './pages/IntakePage'
 import { SummaryPage } from './pages/SummaryPage'
@@ -28,6 +29,8 @@ export default function App() {
   const [questionMode, setQuestionMode] = useState<'canonical' | 'mockRewrite'>('canonical')
   const [displayQuestion, setDisplayQuestion] = useState<string | null>(null)
   const [mockBusy, setMockBusy] = useState(false)
+  const pendingExtractionRef = useRef<AbortController | null>(null)
+  const sessionGenerationRef = useRef(0)
   const mockProvider = useMemo(() => new MockLlmProvider(), [])
   const extractionAdapter = useMemo(() => new SlotExtractionAdapter(mockProvider), [mockProvider])
   const rewriteAdapter = useMemo(() => new QuestionRewriteAdapter(mockProvider), [mockProvider])
@@ -38,15 +41,19 @@ export default function App() {
       setDisplayQuestion(null)
       return
     }
-    let cancelled = false
+    const controller = new AbortController()
     setDisplayQuestion(question.question)
     void rewriteAdapter.rewrite({
+      schemaVersion: LLM_SCHEMA_VERSION,
       slotId: question.id,
       canonicalQuestion: question.question,
       complaintContext: result.session.chiefComplaints,
+      required: question.required,
+      inputType: question.inputType,
+      unit: question.unit,
       locale: 'zh-CN',
-    }).then((rewrite) => {
-      if (cancelled) return
+    }, controller.signal).then((rewrite) => {
+      if (controller.signal.aborted) return
       setDisplayQuestion(rewrite.question)
       setResult((current) => {
         if (!current || current.session.currentSlotId !== rewrite.slotId) return current
@@ -54,12 +61,15 @@ export default function App() {
       })
     })
     return () => {
-      cancelled = true
+      controller.abort(new Error('provider_aborted'))
     }
   }, [result?.session.currentSlotId, questionMode, rewriteAdapter])
 
   const begin = (quickComplaint?: ComplaintId) => {
     try {
+      pendingExtractionRef.current?.abort(new Error('provider_aborted'))
+      pendingExtractionRef.current = null
+      sessionGenerationRef.current += 1
       setResult(startSession({
         age: Number(age),
         initialText,
@@ -71,6 +81,10 @@ export default function App() {
   }
 
   const restart = () => {
+    pendingExtractionRef.current?.abort(new Error('provider_aborted'))
+    pendingExtractionRef.current = null
+    sessionGenerationRef.current += 1
+    setMockBusy(false)
     setInitialText('')
     setResult(null)
   }
@@ -96,14 +110,32 @@ export default function App() {
   const answerWithMock = async (text: string) => {
     if (!result || mockBusy || !mockNluEnabled) return
     setMockBusy(true)
+    pendingExtractionRef.current?.abort(new Error('provider_aborted'))
+    const controller = new AbortController()
+    pendingExtractionRef.current = controller
+    const sessionId = result.session.sessionId
+    const generation = sessionGenerationRef.current
     try {
-      setResult(await answerFreeText(result.session, text, extractionAdapter))
+      const next = await answerFreeText(result.session, text, extractionAdapter, controller.signal)
+      if (controller.signal.aborted || generation !== sessionGenerationRef.current) return
+      setResult((current) => current?.session.sessionId === sessionId ? next : current)
     } catch {
-      setResult(createSafeErrorResult(result.session, 'controller.adapter_error'))
+      if (!controller.signal.aborted && generation === sessionGenerationRef.current) {
+        setResult((current) => current?.session.sessionId === sessionId
+          ? createSafeErrorResult(result.session, 'controller.adapter_error')
+          : current)
+      }
     } finally {
-      setMockBusy(false)
+      if (pendingExtractionRef.current === controller) {
+        pendingExtractionRef.current = null
+        setMockBusy(false)
+      }
     }
   }
+
+  useEffect(() => () => {
+    pendingExtractionRef.current?.abort(new Error('provider_aborted'))
+  }, [])
 
   return (
     <div className="app-shell">

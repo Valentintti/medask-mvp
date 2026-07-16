@@ -59,15 +59,18 @@ Demo 使用保守风险规则识别明确胸痛、明显呼吸困难、喘不上
 
 - Provider只接收当前任务需要的主诉、允许槽位、当前槽位、当前文本、已有槽位ID、语言和Schema版本。
 - 原始文本先经过确定性风险检查；风险命中时立即升级，Provider不会被调用。
-- 模型输出依次经过严格Schema、槽位类型与范围、证据、局部否定、候选值风险和接受策略校验。
-- 只有置信度不低于0.90、状态为asserted且全部校验通过的非风险候选，才由Harness写入answers。
+- 模型输出使用破坏性升级后的 Schema 1.1：`unresolvedSlotIds` 只能引用本轮允许槽位，顶层和候选对象出现 diagnosis、treatment、medication、状态控制等额外字段会整次拒绝。
+- 模型 evidence 会先在完整 `userText` 中定位全部出现位置，再按局部子句分析否定、历史、已缓解、假设和当前肯定语境；缩短 evidence 不能绕过“没有发热”等上下文。
+- 只有置信度不低于0.90、状态为asserted且至少存在一个当前肯定语境的非风险候选，才可能由Harness二次校验后写入answers。historical、resolved、hypothetical、negated和uncertain均不写当前槽位。
 - 胸痛、呼吸困难和意识相关风险槽位永远不能由模型自动确认。
-- 与已有答案冲突时不覆盖，由Harness生成固定澄清问题。
-- Provider异常、超时、非法JSON或非法改写都回退到标准问题，不自动重试。
+- 与已有答案相同的候选是no-op；不同值不覆盖，由Harness生成固定澄清问题。
+- Provider接口支持`AbortSignal`。异常、超时、会话重启、页面卸载、非法JSON或非法改写都会取消或回退到标准问题，不自动重试，迟到响应不能写入新会话。
 
-问题改写只影响页面显示措辞，不修改slotId、required、showWhen、maxTurns或问诊状态。完整设计见 [`docs/llm-adapter-design.md`](docs/llm-adapter-design.md)。
+问题改写只影响页面显示措辞，不修改slotId、required、showWhen、maxTurns或问诊状态。风险槽位不会调用改写Provider；普通改写必须保持否定极性、时间范围、问句类型、单位和必答含义，否则回退标准问题。完整设计见 [`docs/llm-adapter-design.md`](docs/llm-adapter-design.md)。
 
-合成离线评测集位于 `src/llm/evals/slotExtractionCases.ts`，包含30条人工编写案例，计算slot precision、slot recall、exact match、非法输出拒绝率、风险覆盖错误数和幻觉证据数。这些是工程指标，不是临床准确率。
+合成离线评测集位于 `src/llm/evals/slotExtractionCases.ts`，包含30条人工编写案例。有效提取、风险前置、非法输出、低置信、uncertain和冲突分别使用独立分母；空分母不会被记为100%。这些是可重复的工程指标，不是临床准确率，AI高置信或一致也不等于正确。
+
+当前仍未连接真实模型API。未来真实Provider必须支持请求取消、最小化与脱敏、速率限制、超时、迟到响应隔离和Schema版本协商；这些能力不能由模型自行声明或绕过。
 
 ## 与数据工程项目的关系
 

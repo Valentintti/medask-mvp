@@ -1,9 +1,11 @@
 import type { AnswerValue, ComplaintId } from '../../types/intake'
+import type { CandidateStatus } from '../types'
+import { LLM_SCHEMA_VERSION } from '../types'
 
 const response = (candidates: unknown[], needsClarification = false) => ({
-  schemaVersion: '1.0',
+  schemaVersion: LLM_SCHEMA_VERSION,
   candidates,
-  unresolved: [],
+  unresolvedSlotIds: [],
   needsClarification,
 })
 
@@ -12,7 +14,7 @@ const candidate = (
   value: AnswerValue,
   confidence: number,
   evidence: string,
-  status: 'asserted' | 'negated' | 'uncertain' = 'asserted',
+  status: CandidateStatus = 'asserted',
 ) => ({ slotId, value, confidence, evidence, status })
 
 export interface SlotExtractionEvalCase {
@@ -24,6 +26,9 @@ export interface SlotExtractionEvalCase {
   expectedAccepted: Array<{ slotId: string; value: AnswerValue }>
   invalidOutput?: boolean
   riskExpected?: boolean
+  lowConfidenceExpected?: boolean
+  uncertainExpected?: boolean
+  conflictExpected?: boolean
 }
 
 /** 全部为人工编写的合成句，不包含真实患者数据。 */
@@ -42,20 +47,20 @@ export const slotExtractionCases: SlotExtractionEvalCase[] = [
   { id: 'multi-slot', userText: '昨天开始干咳', complaints: ['cough'], rawResponse: response([candidate('onset', '昨天', .96, '昨天开始'), candidate('coughType', 'dry', .97, '干咳')]), expectedAccepted: [{ slotId: 'onset', value: '昨天' }, { slotId: 'coughType', value: 'dry' }] },
   { id: 'negated-chest', userText: '没有胸痛', complaints: ['fever'], rawResponse: response([candidate('chestPain', false, .99, '没有胸痛', 'negated')]), expectedAccepted: [] },
   { id: 'negated-breathing', userText: '没有呼吸困难', complaints: ['cough'], rawResponse: response([candidate('breathingDifficulty', false, .99, '没有呼吸困难', 'negated')]), expectedAccepted: [] },
-  { id: 'uncertain-fever', userText: '可能有点发烧吧', complaints: ['cough'], rawResponse: response([candidate('feverAssociated', true, .6, '可能有点发烧', 'uncertain')], true), expectedAccepted: [] },
-  { id: 'low-confidence', userText: '好像昨天开始', complaints: ['fever'], rawResponse: response([candidate('onset', '昨天', .72, '昨天开始')], true), expectedAccepted: [] },
+  { id: 'uncertain-fever', userText: '可能有点发烧吧', complaints: ['cough'], rawResponse: response([candidate('feverAssociated', true, .95, '可能有点发烧', 'uncertain')], true), expectedAccepted: [], uncertainExpected: true },
+  { id: 'low-confidence', userText: '好像昨天开始', complaints: ['fever'], rawResponse: response([candidate('onset', '昨天', .72, '昨天开始')], true), expectedAccepted: [], lowConfidenceExpected: true },
   { id: 'out-of-range', userText: '机器写成999度', complaints: ['fever'], rawResponse: response([candidate('currentTemperature', 999, .99, '999度')]), expectedAccepted: [], invalidOutput: true },
   { id: 'unknown-slot', userText: '模型提到神秘字段', complaints: ['fever'], rawResponse: response([candidate('mysterySlot', '值', .99, '神秘字段')]), expectedAccepted: [], invalidOutput: true },
   { id: 'hallucinated-evidence', userText: '今天不舒服', complaints: ['fever'], rawResponse: response([candidate('onset', '昨天', .99, '昨天开始')]), expectedAccepted: [], invalidOutput: true },
-  { id: 'existing-conflict', userText: '现在已经37度', complaints: ['fever'], existingAnswers: { currentTemperature: 38.5 }, rawResponse: response([candidate('currentTemperature', 37, .99, '37度')]), expectedAccepted: [] },
+  { id: 'existing-conflict', userText: '现在已经37度', complaints: ['fever'], existingAnswers: { currentTemperature: 38.5 }, rawResponse: response([candidate('currentTemperature', 37, .99, '37度')]), expectedAccepted: [], conflictExpected: true },
   { id: 'risk-chest', userText: '现在突然胸痛', complaints: ['fever'], rawResponse: response([candidate('onset', '现在', .99, '现在')]), expectedAccepted: [], riskExpected: true },
   { id: 'risk-breathing', userText: '现在喘不上气', complaints: ['cough'], rawResponse: response([candidate('onset', '现在', .99, '现在')]), expectedAccepted: [], riskExpected: true },
   { id: 'risk-faint', userText: '刚才突然晕倒', complaints: ['fever'], rawResponse: response([candidate('onset', '刚才', .99, '刚才')]), expectedAccepted: [], riskExpected: true },
-  { id: 'resolved-uncertain', userText: '之前发热现在好了', complaints: ['fever'], rawResponse: response([candidate('feverPattern', '不确定', .62, '之前发热现在好了', 'uncertain')], true), expectedAccepted: [] },
-  { id: 'historical-onset', userText: '去年有过一次', complaints: ['fever'], rawResponse: response([candidate('onset', '去年', .91, '去年')]), expectedAccepted: [{ slotId: 'onset', value: '去年' }] },
+  { id: 'resolved-uncertain', userText: '之前发热现在好了', complaints: ['fever'], rawResponse: response([candidate('feverPattern', '不确定', .95, '之前发热现在好了', 'resolved')], true), expectedAccepted: [] },
+  { id: 'historical-onset', userText: '去年有过一次', complaints: ['fever'], rawResponse: response([candidate('onset', '去年', .95, '去年', 'historical')]), expectedAccepted: [] },
   { id: 'recurrence-multi', userText: '今天又发热而且反复', complaints: ['fever'], rawResponse: response([candidate('onset', '今天', .95, '今天'), candidate('feverPattern', '反复', .95, '反复')]), expectedAccepted: [{ slotId: 'onset', value: '今天' }, { slotId: 'feverPattern', value: '反复' }] },
   { id: 'negation-conflict', userText: '没有发热', complaints: ['cough'], rawResponse: response([candidate('feverAssociated', true, .98, '没有发热')]), expectedAccepted: [], invalidOutput: true },
-  { id: 'extra-field', userText: '返回额外字段', complaints: ['fever'], rawResponse: { schemaVersion: '1.0', candidates: [], unresolved: [], needsClarification: false, diagnosis: '禁止' }, expectedAccepted: [], invalidOutput: true },
+  { id: 'extra-field', userText: '返回额外字段', complaints: ['fever'], rawResponse: { schemaVersion: LLM_SCHEMA_VERSION, candidates: [], unresolvedSlotIds: [], needsClarification: false, diagnosis: '禁止' }, expectedAccepted: [], invalidOutput: true },
   { id: 'invalid-json', userText: '返回非法JSON', complaints: ['fever'], rawResponse: '{not-json', expectedAccepted: [], invalidOutput: true },
   { id: 'invalid-option', userText: '咳嗽类型未知编码', complaints: ['cough'], rawResponse: response([candidate('coughType', 'wet-code', .99, '未知编码')]), expectedAccepted: [], invalidOutput: true },
 ]

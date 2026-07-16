@@ -1,6 +1,6 @@
 import { complaintRules } from '../data/complaintRules'
 import { riskRules } from '../data/riskRules'
-import { findTermOccurrences } from '../engines/contextMatcher'
+import { findEvidenceOccurrences, findTermOccurrences, type TermOccurrence } from '../engines/contextMatcher'
 import type { AnswerValue, SlotDefinition } from '../types/intake'
 import type { CandidateRejectionReason, SlotCandidate } from './types'
 
@@ -26,14 +26,55 @@ const positiveTermsBySlot: Record<string, string[]> = {
 }
 
 export function answersEqual(left: AnswerValue, right: AnswerValue): boolean {
+  if (
+    (typeof left === 'number' || typeof left === 'string') &&
+    (typeof right === 'number' || typeof right === 'string')
+  ) {
+    const numericPattern = /^-?(?:\d+\.?\d*|\.\d+)$/u
+    const leftText = String(left).trim()
+    const rightText = String(right).trim()
+    if (numericPattern.test(leftText) && numericPattern.test(rightText)) {
+      return Number(leftText) === Number(rightText)
+    }
+  }
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
-function assertedContradictsNegation(candidate: SlotCandidate): boolean {
+function relevantEvidenceContexts(
+  userText: string,
+  candidate: SlotCandidate,
+): TermOccurrence[] {
+  const evidenceOccurrences = findEvidenceOccurrences(userText, candidate.evidence)
   const terms = positiveTermsBySlot[candidate.slotId]
-  if (!terms) return false
-  const occurrences = findTermOccurrences(candidate.evidence, terms)
-  return occurrences.length > 0 && occurrences.every((occurrence) => occurrence.negated)
+  if (!terms) return evidenceOccurrences
+
+  const termOccurrences = findTermOccurrences(userText, terms)
+  const relevantTerms = termOccurrences.filter((termOccurrence) =>
+    evidenceOccurrences.some((evidenceOccurrence) => {
+      const evidenceStart = evidenceOccurrence.index
+      const evidenceEnd = evidenceStart + candidate.evidence.length
+      const termStart = termOccurrence.index
+      const termEnd = termStart + termOccurrence.term.length
+      return termStart < evidenceEnd && termEnd > evidenceStart
+    }),
+  )
+  return relevantTerms.length > 0 ? relevantTerms : evidenceOccurrences
+}
+
+function contextRejectionReason(
+  occurrences: TermOccurrence[],
+): CandidateRejectionReason | null {
+  if (occurrences.some((occurrence) => occurrence.contextStatus === 'asserted')) return null
+  const statuses = new Set(occurrences.map((occurrence) => occurrence.contextStatus))
+  if (statuses.size === 1 && statuses.has('negated')) return 'negation_conflict'
+  if (statuses.size === 1 && statuses.has('historical')) return 'historical_context'
+  if (statuses.size === 1 && statuses.has('resolved')) return 'resolved_context'
+  if (statuses.size === 1 && statuses.has('hypothetical')) return 'hypothetical_context'
+  // 混合的非当前语境也不能自动写入；选择最保守且可解释的原因。
+  if (statuses.has('resolved')) return 'resolved_context'
+  if (statuses.has('historical')) return 'historical_context'
+  if (statuses.has('hypothetical')) return 'hypothetical_context'
+  return 'negation_conflict'
 }
 
 export function evaluateCandidateAcceptance(input: {
@@ -48,12 +89,22 @@ export function evaluateCandidateAcceptance(input: {
 
   if (MODEL_BLOCKED_RISK_SLOT_IDS.has(candidate.slotId)) return 'risk_slot_blocked'
   if (candidate.confidence < threshold) return 'confidence_low'
-  if (candidate.status !== 'asserted') return 'status_not_asserted'
   if (!candidate.evidence) return 'evidence_missing'
   if (!userText.includes(candidate.evidence)) return 'evidence_hallucinated'
-  if (assertedContradictsNegation(candidate)) return 'negation_conflict'
-  if (existingValue !== undefined && !answersEqual(existingValue, candidate.value)) {
-    return 'existing_value_conflict'
+  if (candidate.status === 'negated') return 'candidate_negated'
+  if (candidate.status === 'uncertain') return 'candidate_uncertain'
+  if (candidate.status === 'historical') return 'historical_context'
+  if (candidate.status === 'resolved') return 'resolved_context'
+  if (candidate.status === 'hypothetical') return 'hypothetical_context'
+  if (candidate.status !== 'asserted') return 'status_not_asserted'
+
+  const contextReason = contextRejectionReason(relevantEvidenceContexts(userText, candidate))
+  if (contextReason) return contextReason
+
+  if (existingValue !== undefined) {
+    return answersEqual(existingValue, candidate.value)
+      ? 'already_answered_same_value'
+      : 'existing_value_conflict'
   }
 
   if (slot.inputType === 'number' && typeof candidate.value !== 'number') return 'value_invalid'

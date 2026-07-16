@@ -3,6 +3,7 @@ import { checkStructuredRisk, checkTextRisk } from '../engines/riskEngine'
 import { getSessionSlots, selectNextSlot, validateSlotAnswer } from '../engines/slotEngine'
 import { createSummary } from '../engines/summaryEngine'
 import { formatAnswerValue } from '../engines/answerFormatter'
+import { MODEL_BLOCKED_RISK_SLOT_IDS } from '../llm/acceptancePolicy'
 import { appendLlmTrace } from '../llm/llmTrace'
 import { SlotExtractionAdapter } from '../llm/slotExtractionAdapter'
 import type {
@@ -305,7 +306,7 @@ export function processExtractionCandidates(
   extraction: ExtractionAdapterResult,
 ): FreeTextControllerResult {
   let next = appendLlmTrace(session, extraction.trace)
-  const acceptedSlotIds = extraction.acceptedCandidates.map((candidate) => candidate.slotId)
+  const acceptedSlotIds: string[] = []
 
   if (extraction.fallbackToRules) {
     const question = currentQuestion(next)
@@ -337,11 +338,18 @@ export function processExtractionCandidates(
 
   for (const candidate of extraction.acceptedCandidates) {
     const slot = getSessionSlot(next, candidate.slotId)
-    if (!slot || next.answers[candidate.slotId] !== undefined) continue
+    if (
+      !slot ||
+      MODEL_BLOCKED_RISK_SLOT_IDS.has(candidate.slotId) ||
+      next.answers[candidate.slotId] !== undefined ||
+      !validateSlotAnswer(slot, candidate.value).valid ||
+      checkTextRisk(typeof candidate.value === 'string' ? candidate.value : '').matched
+    ) continue
     next = {
       ...next,
       answers: { ...next.answers, [candidate.slotId]: candidate.value },
     }
+    acceptedSlotIds.push(candidate.slotId)
     next = appendTrace(next, {
       eventType: 'slot_answered',
       input: { slotId: candidate.slotId, source: 'validated_adapter' },
@@ -351,6 +359,7 @@ export function processExtractionCandidates(
   }
 
   const formatted = extraction.acceptedCandidates
+    .filter((candidate) => acceptedSlotIds.includes(candidate.slotId))
     .map((candidate) => {
       const slot = getSessionSlot(next, candidate.slotId)
       return slot ? `${slot.label}：${formatAnswerValue(slot, candidate.value)}` : null
@@ -399,6 +408,7 @@ export async function answerFreeText(
   session: IntakeSession,
   userText: string,
   adapter: SlotExtractionAdapter,
+  signal?: AbortSignal,
 ): Promise<FreeTextControllerResult> {
   if (session.status !== 'collecting') {
     return {
@@ -423,15 +433,26 @@ export async function answerFreeText(
     currentQuestionSlotId: checked.currentSlotId,
     userText,
     existingAnswers: checked.answers,
-  })
+  }, signal)
+  if (signal?.aborted) {
+    return {
+      session: checked,
+      question: currentQuestion(checked),
+      summary: null,
+      message: currentQuestion(checked)?.question ?? '请使用标准选项继续。',
+      acceptedSlotIds: [],
+      conflicts: [],
+    }
+  }
   return processExtractionCandidates(checked, extraction)
 }
 
 export async function startSessionWithAdapter(
   input: StartSessionInput,
   adapter: SlotExtractionAdapter | null,
+  signal?: AbortSignal,
 ): Promise<FreeTextControllerResult | ControllerResult> {
   const base = startSession(input)
   if (!adapter || !input.initialText || base.session.status !== 'collecting') return base
-  return answerFreeText(base.session, input.initialText, adapter)
+  return answerFreeText(base.session, input.initialText, adapter, signal)
 }

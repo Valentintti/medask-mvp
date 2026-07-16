@@ -5,11 +5,12 @@ import type {
   SlotExtractionRawResponse,
   SlotExtractionRequest,
 } from './types'
+import { LLM_SCHEMA_VERSION } from './types'
 
 const response = (candidates: unknown[], needsClarification = false) => ({
-  schemaVersion: '1.0',
+  schemaVersion: LLM_SCHEMA_VERSION,
   candidates,
-  unresolved: [],
+  unresolvedSlotIds: [],
   needsClarification,
 })
 
@@ -50,14 +51,14 @@ const BUILT_IN_RESPONSES: Record<string, unknown> = {
   ]),
   '__INVALID_JSON__': '{invalid json',
   '__EXTRA_FIELD__': {
-    schemaVersion: '1.0', candidates: [], unresolved: [], needsClarification: false, diagnosis: '禁止',
+    schemaVersion: LLM_SCHEMA_VERSION, candidates: [], unresolvedSlotIds: [], needsClarification: false, diagnosis: '禁止',
   },
 }
 
 const REWRITES: Record<string, string> = {
   onset: '这些不适是从什么时候开始的？',
-  currentTemperature: '现在测到的体温是多少？',
-  maxTemperature: '这次最高体温是多少？',
+  currentTemperature: '现在测到的体温是多少？没测过也可以跳过。',
+  maxTemperature: '这次最高体温是多少？没测过也可以跳过。',
   feverPattern: '发热是持续的，还是会反复？',
   coughType: '咳嗽主要是干咳，还是有痰？',
   duration: '咳嗽持续多久了？',
@@ -74,28 +75,58 @@ export interface MockProviderOptions {
   throwInputs?: string[]
 }
 
+function waitForDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(signal.reason ?? new Error('provider_aborted'))
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, delayMs)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(signal?.reason ?? new Error('provider_aborted'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 export class MockLlmProvider implements LlmProvider {
   readonly name = 'mock-deterministic-v1'
   extractionCallCount = 0
   rewriteCallCount = 0
+  abortedExtractionCount = 0
+  abortedRewriteCount = 0
   lastExtractionRequest: SlotExtractionRequest | null = null
 
   constructor(private readonly options: MockProviderOptions = {}) {}
 
-  async extractSlots(input: SlotExtractionRequest): Promise<SlotExtractionRawResponse> {
+  async extractSlots(input: SlotExtractionRequest, signal?: AbortSignal): Promise<SlotExtractionRawResponse> {
     this.extractionCallCount += 1
     this.lastExtractionRequest = structuredClone(input)
-    if (this.options.delayMs) await new Promise((resolve) => setTimeout(resolve, this.options.delayMs))
+    try {
+      if (this.options.delayMs) await waitForDelay(this.options.delayMs, signal)
+    } catch (error) {
+      if (signal?.aborted) this.abortedExtractionCount += 1
+      throw error
+    }
+    if (signal?.aborted) throw signal.reason ?? new Error('provider_aborted')
     if (this.options.throwInputs?.includes(input.userText)) throw new Error('mock_provider_failure')
     return this.options.responses?.[input.userText] ?? BUILT_IN_RESPONSES[input.userText] ?? response([], true)
   }
 
-  async rewriteQuestion(input: QuestionRewriteRequest): Promise<QuestionRewriteRawResponse> {
+  async rewriteQuestion(input: QuestionRewriteRequest, signal?: AbortSignal): Promise<QuestionRewriteRawResponse> {
     this.rewriteCallCount += 1
-    if (this.options.delayMs) await new Promise((resolve) => setTimeout(resolve, this.options.delayMs))
+    try {
+      if (this.options.delayMs) await waitForDelay(this.options.delayMs, signal)
+    } catch (error) {
+      if (signal?.aborted) this.abortedRewriteCount += 1
+      throw error
+    }
+    if (signal?.aborted) throw signal.reason ?? new Error('provider_aborted')
     const override = this.options.rewriteResponses?.[input.slotId]
     if (override !== undefined) return override
     return {
+      schemaVersion: LLM_SCHEMA_VERSION,
       rewrittenQuestion: REWRITES[input.slotId] ?? input.canonicalQuestion,
       confidence: 0.96,
     }
