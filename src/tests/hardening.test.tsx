@@ -136,6 +136,17 @@ describe('缺失信息分类与显示格式', () => {
     expect(summary.skippedInformation).not.toContain('痰液颜色')
   })
 
+  it('showWhen前置答案未知时仍属于unanswered而非notApplicable', () => {
+    const session = createIntakeSession(30)
+    session.status = 'completed'
+    session.chiefComplaints = ['cough']
+    const summary = createSummary(session)
+    expect(summary.unansweredInformation).toContain('痰液颜色')
+    expect(summary.unansweredInformation).toContain('最高体温')
+    expect(summary.notApplicableInformation).not.toContain('痰液颜色')
+    expect(summary.notApplicableInformation).not.toContain('最高体温')
+  })
+
   it('singleSelect 的 dry 统一显示为“干咳”', () => {
     const session = createIntakeSession(30)
     session.chiefComplaints = ['cough']

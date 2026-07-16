@@ -30,9 +30,12 @@ export function createSummary(session: IntakeSession): IntakeSummary {
       skippedInformation.push(slot.label)
       continue
     }
+    const dependencyValue = slot.showWhen
+      ? session.answers[slot.showWhen.slotId]
+      : undefined
     if (
       session.notApplicableSlotIds.includes(slot.id) ||
-      (slot.showWhen && session.answers[slot.showWhen.slotId] !== slot.showWhen.equals)
+      (slot.showWhen && dependencyValue !== undefined && dependencyValue !== slot.showWhen.equals)
     ) {
       notApplicableInformation.push(slot.label)
       continue

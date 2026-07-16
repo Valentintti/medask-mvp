@@ -1,6 +1,6 @@
 import { complaintRules } from '../data/complaintRules'
 import type { AnswerValue, ComplaintId } from '../types/intake'
-import { hasAffirmedTerm, type TermOccurrence } from './contextMatcher'
+import { findTermOccurrences, hasAffirmedTerm, type TermOccurrence } from './contextMatcher'
 
 function isLocalHeatExpression(text: string, occurrence: TermOccurrence): boolean {
   const context = text.slice(
@@ -40,12 +40,62 @@ function extractTemperatures(text: string): { current?: number; maximum?: number
   const readings = [...text.matchAll(/(3[5-9](?:\.\d)?|4[0-3](?:\.\d)?)\s*(?:℃|度)/gu)]
   if (readings.length === 0) return {}
 
-  const values = readings.map((match) => Number(match[1]))
   const result: { current?: number; maximum?: number } = {}
-  if (/最高/u.test(text)) result.maximum = Math.max(...values)
-  if (/(?:现在|当前|刚测|体温)/u.test(text)) result.current = values.at(-1)
-  if (result.current === undefined && result.maximum === undefined) result.current = values[0]
+  const clauseBoundary = /[，。！？；,.!?;]/u
+
+  for (const reading of readings) {
+    const index = reading.index ?? 0
+    const value = Number(reading[1])
+    const before = text.slice(Math.max(0, index - 24), index)
+    const prefix = before.split(clauseBoundary).at(-1) ?? ''
+    const after = text.slice(index + reading[0].length, index + reading[0].length + 28)
+    const suffix = after.split(clauseBoundary)[0] ?? ''
+    const clause = `${prefix}${reading[0]}${suffix}`
+    const followingContext = text.slice(index + reading[0].length, index + reading[0].length + 36)
+    const isMaximum = /(?:最高|峰值|最高烧到|最多烧到)[^，。！？；,.!?;]{0,8}$/u.test(prefix)
+    const isCurrent = /(?:现在|当前|目前|刚测|刚刚测)[^，。！？；,.!?;]{0,8}$/u.test(prefix)
+    const isHistorical = /(?:昨天|前天|昨晚|之前|以前|当时|前几天|上周|去年)[^，。！？；,.!?;]{0,10}$/u.test(prefix)
+    const isHypothetical = /(?:如果|假如|万一|会不会|可能会)[^，。！？；,.!?;]{0,12}$/u.test(prefix)
+    const isNegatedReading = /(?:不到|未到|没有达到|不是)[^，。！？；,.!?;]{0,8}$/u.test(prefix)
+    const isResolved = /(?:退烧|退热|烧退|已经不烧|不再发热|体温(?:已|已经)?恢复正常)/u.test(clause) ||
+      /^(?:[^，。！？；,.!?;]{0,12}[，,])?[^。！？；.!?;]{0,8}(?:现在|目前|已经)[^。！？；.!?;]{0,8}(?:退烧|退热|烧退|不烧|恢复正常)/u.test(followingContext)
+
+    if (isMaximum) {
+      result.maximum = result.maximum === undefined ? value : Math.max(result.maximum, value)
+      continue
+    }
+    if (isResolved || isHistorical || isHypothetical || isNegatedReading) continue
+    if (isCurrent || (!isMaximum && !isHistorical)) result.current = value
+  }
   return result
+}
+
+function extractCoughType(text: string): 'dry' | 'productive' | null {
+  const noSputumOccurrences = findTermOccurrences(text, ['没有痰', '无痰', '不咳痰'])
+  const noSputumRanges = noSputumOccurrences.map((occurrence) => ({
+    start: occurrence.index,
+    end: occurrence.index + occurrence.term.length,
+  }))
+  const overlapsNoSputum = (occurrence: TermOccurrence) =>
+    noSputumRanges.some((range) =>
+      occurrence.index < range.end && occurrence.index + occurrence.term.length > range.start,
+    )
+
+  const candidates: Array<{ index: number; type: 'dry' | 'productive' }> = []
+  for (const occurrence of findTermOccurrences(text, ['干咳'])) {
+    if (occurrence.contextStatus === 'asserted') candidates.push({ index: occurrence.index, type: 'dry' })
+  }
+  for (const occurrence of noSputumOccurrences) {
+    if (occurrence.contextStatus === 'asserted') candidates.push({ index: occurrence.index, type: 'dry' })
+  }
+  for (const occurrence of findTermOccurrences(text, ['有痰', '咳痰'])) {
+    if (occurrence.contextStatus === 'asserted' && !overlapsNoSputum(occurrence)) {
+      candidates.push({ index: occurrence.index, type: 'productive' })
+    }
+  }
+
+  candidates.sort((left, right) => left.index - right.index)
+  return candidates.at(-1)?.type ?? null
 }
 
 export function extractInitialAnswers(
@@ -61,9 +111,8 @@ export function extractInitialAnswers(
   if (temperatures.maximum !== undefined) answers.maxTemperature = temperatures.maximum
 
   if (complaints.includes('cough')) {
-    // 否定表达必须先于“有痰”子串判断，避免“没有痰”被误判。
-    if (/(?:干咳|无痰|没有痰)/u.test(text)) answers.coughType = 'dry'
-    else if (/(?:有痰|咳痰)/u.test(text)) answers.coughType = 'productive'
+    const coughType = extractCoughType(text)
+    if (coughType) answers.coughType = coughType
   }
 
   if (complaints.includes('fever') && complaints.includes('cough')) {

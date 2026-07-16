@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectComplaints } from '../engines/complaintEngine'
+import { detectComplaints, extractInitialAnswers } from '../engines/complaintEngine'
 import { getSessionSlots, selectNextSlot } from '../engines/slotEngine'
 import { createSummary } from '../engines/summaryEngine'
 import { answerCurrentSlot, startSession } from '../harness/intakeController'
@@ -126,6 +126,28 @@ describe('槽位选择', () => {
     const result = startSession({ age: 42, initialText: '最近干咳，没有痰' })
     expect(result.session.answers.coughType).toBe('dry')
     expect(result.session.askedSlotIds).not.toContain('coughType')
+  })
+
+  it('昨天高烧且现在已退烧不写入当前体温', () => {
+    const answers = extractInitialAnswers('昨天38.5度，现在已退烧', ['fever'])
+    expect(answers.currentTemperature).toBeUndefined()
+  })
+
+  it('体温最高39度只写入最高体温', () => {
+    const answers = extractInitialAnswers('体温最高39度', ['fever'])
+    expect(answers.maxTemperature).toBe(39)
+    expect(answers.currentTemperature).toBeUndefined()
+  })
+
+  it('最高体温和当前体温按各自局部语境提取', () => {
+    const answers = extractInitialAnswers('最高39度，现在38.5度', ['fever'])
+    expect(answers.maxTemperature).toBe(39)
+    expect(answers.currentTemperature).toBe(38.5)
+  })
+
+  it('“不是干咳，是有痰”识别为productive', () => {
+    const answers = extractInitialAnswers('不是干咳，是有痰', ['cough'])
+    expect(answers.coughType).toBe('productive')
   })
 })
 
