@@ -27,6 +27,21 @@ function SummarySection({
 }
 
 export function SummaryPage({ summary, onRestart }: { summary: IntakeSummary; onRestart: () => void }) {
+  const copySummary = async () => {
+    const lines = [
+      `患者类型：${summary.patientType}`,
+      `主诉：${summary.chiefComplaints.join('、') || '未识别'}`,
+      ...summary.onset.map((item) => `${item.label}：${item.displayValue}`),
+      ...summary.currentSymptoms.map((item) => `${item.label}：${item.displayValue}`),
+      ...summary.associatedSymptoms.map((item) => `${item.label}：${item.displayValue}`),
+      ...summary.measuresTaken.map((item) => `${item.label}：${item.displayValue}`),
+      `尚未获取：${summary.unansweredInformation.join('、') || '无'}`,
+      `用户暂不清楚：${summary.skippedInformation.join('、') || '无'}`,
+      summary.disclaimer,
+    ]
+    await navigator.clipboard.writeText(lines.join('\n'))
+  }
+
   return (
     <main className="summary-page">
       <span className="eyebrow">STRUCTURED HANDOFF</span>
@@ -51,7 +66,11 @@ export function SummaryPage({ summary, onRestart }: { summary: IntakeSummary; on
       </section>
 
       <p className="summary-disclaimer">{summary.disclaimer}</p>
-      <button onClick={onRestart}>开始新的信息整理</button>
+      <div className="summary-actions">
+        <button onClick={() => void copySummary()}>复制摘要</button>
+        <button className="secondary-action" onClick={() => window.print()}>打印或保存为 PDF</button>
+        <button className="secondary-action" onClick={onRestart}>重新开始</button>
+      </div>
     </main>
   )
 }

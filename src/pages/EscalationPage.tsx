@@ -8,13 +8,10 @@ export function EscalationPage({ session, message, onRestart }: {
   return (
     <main className="result-page escalation-page">
       <div className="status-icon" aria-hidden="true">!</div>
-      <span className="eyebrow">MANUAL REVIEW NEEDED</span>
+      <span className="eyebrow">需要人工或线下协助</span>
       <h1>请停止普通预问诊</h1>
       <p className="result-message">{message}</p>
-      <div className="reason-card">
-        <span>升级原因</span>
-        <strong>{session.escalationReason}</strong>
-      </div>
+      {session.escalationReason && <div className="reason-card"><span>停止原因</span><strong>{session.escalationReason}</strong></div>}
       <p className="fine-print">本提示不代表任何疾病判断。</p>
       <button onClick={onRestart}>返回首页</button>
     </main>

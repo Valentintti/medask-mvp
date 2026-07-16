@@ -9,6 +9,8 @@ import {
   startSession,
 } from './harness/intakeController'
 import { createIntakeSession } from './harness/sessionState'
+import { recordProductEvent } from './harness/productEventLogger'
+import type { DemoCase } from './data/demoCases'
 import { appendLlmTrace } from './llm/llmTrace'
 import { MockLlmProvider } from './llm/mockProvider'
 import { HttpLlmProvider } from './llm/httpProvider'
@@ -21,6 +23,8 @@ import { SummaryPage } from './pages/SummaryPage'
 import { SafeErrorPage } from './pages/SafeErrorPage'
 import { WelcomePage } from './pages/WelcomePage'
 import type { AnswerValue, ComplaintId, ControllerResult } from './types/intake'
+
+const LLM_FALLBACK_NOTICE = '自然语言辅助暂时不可用，你仍可继续按标准问题完成信息整理。'
 
 export default function App() {
   const [age, setAge] = useState('30')
@@ -36,6 +40,7 @@ export default function App() {
   const sessionGenerationRef = useRef(0)
   const extractionOperationKeysRef = useRef(new Set<string>())
   const rewriteQuestionCacheRef = useRef(new Map<string, string>())
+  const llmAvailableEventRecordedRef = useRef(false)
   const mockProvider = useMemo(() => new MockLlmProvider(), [])
   const httpProvider = useMemo(() => new HttpLlmProvider(), [])
   const activeProvider = adapterMode === 'mock' ? mockProvider : adapterMode === 'real' ? httpProvider : null
@@ -45,7 +50,14 @@ export default function App() {
   useEffect(() => {
     const controller = new AbortController(); let mounted = true
     void httpProvider.status(controller.signal).then((status) => {
-      if (mounted) setRealLlmAvailable(status.realLlmEnabled && status.serviceAvailable && status.schemaVersion === LLM_SCHEMA_VERSION)
+      if (!mounted) return
+      const available = status.realLlmEnabled && status.serviceAvailable && status.schemaVersion === LLM_SCHEMA_VERSION
+      setRealLlmAvailable(available)
+      if (available && !llmAvailableEventRecordedRef.current) {
+        llmAvailableEventRecordedRef.current = true
+        recordProductEvent('llm_available')
+      }
+      if (available && !import.meta.env.DEV) setAdapterMode('real')
     }).catch(() => { if (mounted) setRealLlmAvailable(false) })
     return () => { mounted = false; controller.abort() }
   }, [httpProvider])
@@ -79,7 +91,8 @@ export default function App() {
     }, controller.signal).then((rewrite) => {
       if (controller.signal.aborted) return
       if (adapterMode === 'real' && rewrite.trace.outcome === 'fallback') {
-        setLlmServiceNotice('自然语言辅助暂时不可用，已切换为标准问题模式。')
+        setLlmServiceNotice(LLM_FALLBACK_NOTICE)
+        recordProductEvent('llm_fallback')
         setAdapterMode('rules')
         setQuestionMode('canonical')
         return
@@ -104,11 +117,16 @@ export default function App() {
       extractionOperationKeysRef.current.clear()
       rewriteQuestionCacheRef.current.clear()
       setLlmServiceNotice(null)
-      setResult(startSession({
+      const next = startSession({
         age: Number(age),
         initialText,
         quickComplaint,
-      }))
+      })
+      recordProductEvent('session_started')
+      if (next.session.chiefComplaints.length > 0) recordProductEvent('complaint_selected')
+      if (next.session.status === 'escalated') recordProductEvent('risk_escalated')
+      if (next.session.status === 'completed') recordProductEvent('summary_completed')
+      setResult(next)
     } catch {
       setResult(createSafeErrorResult(createIntakeSession(Number(age)), 'controller.start_error'))
     }
@@ -124,12 +142,17 @@ export default function App() {
     setInitialText('')
     setLlmServiceNotice(null)
     setResult(null)
+    recordProductEvent('session_restarted')
   }
 
   const answer = (value: AnswerValue) => {
     if (!result?.question) return
     try {
-      setResult(answerCurrentSlot(result.session, result.question, value))
+      const next = answerCurrentSlot(result.session, result.question, value)
+      recordProductEvent('question_answered')
+      if (next.session.status === 'escalated') recordProductEvent('risk_escalated')
+      if (next.session.status === 'completed') recordProductEvent('summary_completed')
+      setResult(next)
     } catch {
       setResult(createSafeErrorResult(result.session, 'controller.answer_error'))
     }
@@ -138,7 +161,10 @@ export default function App() {
   const skip = () => {
     if (!result?.question) return
     try {
-      setResult(skipCurrentSlot(result.session, result.question))
+      const next = skipCurrentSlot(result.session, result.question)
+      recordProductEvent('question_skipped')
+      if (next.session.status === 'completed') recordProductEvent('summary_completed')
+      setResult(next)
     } catch {
       setResult(createSafeErrorResult(result.session, 'controller.skip_error'))
     }
@@ -158,11 +184,15 @@ export default function App() {
     try {
       const next = await answerFreeText(result.session, text, extractionAdapter, controller.signal)
       if (controller.signal.aborted || generation !== sessionGenerationRef.current) return
-      if (adapterMode === 'real' && next.extractionNotice) {
+      if (adapterMode === 'real' && next.extractionNotice === LLM_FALLBACK_NOTICE) {
         setLlmServiceNotice(next.extractionNotice)
         setAdapterMode('rules')
         setQuestionMode('canonical')
+        recordProductEvent('llm_fallback')
       }
+      if (next.session.turnCount > result.session.turnCount) recordProductEvent('question_answered')
+      if (next.session.status === 'escalated') recordProductEvent('risk_escalated')
+      if (next.session.status === 'completed') recordProductEvent('summary_completed')
       setResult((current) => current?.session.sessionId === sessionId ? next : current)
     } catch {
       if (!controller.signal.aborted && generation === sessionGenerationRef.current) {
@@ -197,6 +227,7 @@ export default function App() {
           questionMode={questionMode}
           onAdapterModeChange={(mode) => { setLlmServiceNotice(null); setAdapterMode(mode === 'mock' && !import.meta.env.DEV ? 'rules' : mode) }}
           onQuestionModeChange={setQuestionMode}
+          onDemoSelect={(demo: DemoCase) => { setAge(String(demo.age)); setInitialText(demo.text) }}
         />
       )}
 
@@ -235,10 +266,10 @@ export default function App() {
 
       {result?.session.status === 'error' && <SafeErrorPage onRestart={restart} />}
 
-      {result && (
+      {import.meta.env.DEV && result && (
         <TracePanel events={result.session.traceEvents} llmEvents={result.session.llmTraceEvents} />
       )}
-      <footer>MedAsk · Rule-based intake demo</footer>
+      <footer>MedAsk · 就医前信息整理 Demo</footer>
     </div>
   )
 }

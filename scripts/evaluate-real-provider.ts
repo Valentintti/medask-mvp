@@ -121,6 +121,7 @@ async function main() {
   const runCount = preflight || baselineJson ? 1 : 3
   const provider = new OpenAiCompatibleProvider({
     apiKey: config.apiKey, baseUrl: config.baseUrl, model: config.model, requestTimeoutMs: config.requestTimeoutMs,
+    deepSeekStrictToolEnabled: config.deepSeekStrictToolEnabled,
     ...(baselineJson ? { extractionStrategy: 'json_object_fallback' as const } : {}),
   })
   const runs: Array<Awaited<ReturnType<typeof runOnce>>> = []

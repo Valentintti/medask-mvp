@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 interface FreeTextAnswerProps {
   busy: boolean
@@ -10,12 +10,18 @@ interface FreeTextAnswerProps {
 
 export function FreeTextAnswer({ busy, notice, clarification, onSubmit, mode }: FreeTextAnswerProps) {
   const [text, setText] = useState('')
+  const submittingRef = useRef(false)
 
   const submit = async () => {
     const trimmed = text.trim()
-    if (!trimmed || busy) return
-    await onSubmit(trimmed)
-    setText('')
+    if (!trimmed || busy || submittingRef.current) return
+    submittingRef.current = true
+    try {
+      await onSubmit(trimmed)
+      setText('')
+    } finally {
+      submittingRef.current = false
+    }
   }
 
   return (

@@ -1,4 +1,5 @@
 import type { ComplaintId } from '../types/intake'
+import { demoCases, type DemoCase } from '../data/demoCases'
 
 interface WelcomePageProps {
   age: string
@@ -11,6 +12,7 @@ interface WelcomePageProps {
   questionMode: 'canonical' | 'rewrite'
   onAdapterModeChange: (mode: 'rules' | 'mock' | 'real') => void
   onQuestionModeChange: (mode: 'canonical' | 'rewrite') => void
+  onDemoSelect: (demo: DemoCase) => void
 }
 
 export function WelcomePage({
@@ -24,16 +26,22 @@ export function WelcomePage({
   questionMode,
   onAdapterModeChange,
   onQuestionModeChange,
+  onDemoSelect,
 }: WelcomePageProps) {
   const canStart = Number(age) > 0
 
   return (
     <main className="welcome-page">
-      <div className="eyebrow">RULE-BASED INTAKE · DEMO</div>
-      <h1>先把症状说清楚，<br />再把信息带给专业人员。</h1>
+      <div className="brand-lockup"><span className="brand-mark">M</span><strong>MedAsk</strong></div>
+      <div className="eyebrow">就医前信息整理 · 产品演示</div>
+      <h1>帮助患者在就医前，<br />整理症状信息。</h1>
       <p className="lead">
-        MedAsk 当前仅为 18—65 岁成人整理发热与咳嗽信息。规则无法理解所有自然语言。
+        当前支持 18—65 岁成人的发热和咳嗽信息整理。它不会提供疾病诊断、药物或治疗建议。
       </p>
+      <div className="service-status" role="status">
+        <span className={realLlmAvailable ? 'status-dot available' : 'status-dot'} />
+        {realLlmAvailable ? '自然语言辅助可用' : '当前使用标准规则模式'}
+      </div>
 
       <section className="start-card" aria-label="开始预问诊">
         <label htmlFor="patient-age">年龄</label>
@@ -51,7 +59,7 @@ export function WelcomePage({
           id="initial-text"
           value={initialText}
           onChange={(event) => onTextChange(event.target.value)}
-          placeholder="例如：我昨天开始发烧，也有点咳嗽"
+          placeholder="例如：我昨天开始发烧，现在38.5度"
           rows={3}
         />
 
@@ -68,10 +76,21 @@ export function WelcomePage({
           disabled={!canStart || !initialText.trim()}
           onClick={() => onStart()}
         >
-          按描述开始整理
+          开始整理
         </button>
 
-        <fieldset className="dev-controls">
+        {import.meta.env.DEV && <section className="demo-cases" aria-label="演示案例">
+          <div><strong>演示案例</strong><small>仅填充合成内容，不会自动提交</small></div>
+          <div className="demo-case-buttons">
+            {demoCases.map((demo) => (
+              <button type="button" className="demo-case-button" key={demo.id} onClick={() => onDemoSelect(demo)}>
+                {demo.title}
+              </button>
+            ))}
+          </div>
+        </section>}
+
+        {import.meta.env.DEV && <fieldset className="dev-controls">
             <legend>自然语言辅助模式</legend>
             <label>
               <input
@@ -109,9 +128,10 @@ export function WelcomePage({
                 使用模型改写问题
               </label>
             </div>
-            <small>{realLlmAvailable ? '真实模式由服务端安全代理提供，模型不控制风险和流程。' : '真实模型未启用或服务端不可用；继续使用规则或开发Mock。'}</small>
-          </fieldset>
+            <small>{realLlmAvailable ? '服务端安全代理可用，模型不控制风险和流程。' : '服务端辅助不可用；继续使用规则或开发Mock。'}</small>
+          </fieldset>}
       </section>
+      <p className="welcome-example"><strong>示例输入：</strong>“昨天开始发烧，现在38.5度，没有胸痛。”</p>
     </main>
   )
 }

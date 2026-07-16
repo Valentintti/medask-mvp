@@ -104,7 +104,7 @@ describe('开发模式Mock适配器页面', () => {
     await user.click(real); await user.click(screen.getByRole('button', { name: '发热快速入口' }))
     await user.type(screen.getByLabelText('也可以用一句话回答当前问题'), '普通描述')
     await user.click(screen.getByRole('button', { name: '整理这段描述' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('自然语言辅助暂时不可用，已切换为标准问题模式。')
+    expect(await screen.findByRole('status')).toHaveTextContent('自然语言辅助暂时不可用，你仍可继续按标准问题完成信息整理。')
     expect(screen.queryByLabelText('也可以用一句话回答当前问题')).not.toBeInTheDocument()
   })
 
@@ -118,7 +118,7 @@ describe('开发模式Mock适配器页面', () => {
     await user.click(real); await user.click(screen.getByRole('button', { name: '发热快速入口' }))
     await user.type(screen.getByLabelText('也可以用一句话回答当前问题'), '普通描述')
     await user.click(screen.getByRole('button', { name: '整理这段描述' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('自然语言辅助暂时不可用，已切换为标准问题模式。')
+    expect(await screen.findByRole('status')).toHaveTextContent('自然语言辅助暂时不可用，你仍可继续按标准问题完成信息整理。')
     expect(screen.queryByLabelText('也可以用一句话回答当前问题')).not.toBeInTheDocument()
   })
 })

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { loadServerConfig } from '../../server/config'
+import { createMedAskServer } from '../../server/index'
 import { OpenAiCompatibleProvider, ProviderRequestError } from '../../server/providers/openAiCompatibleProvider'
 import { createLlmRouter } from '../../server/routes/llmRoutes'
 import { createAuditLogger } from '../../server/security/auditLogger'
@@ -26,7 +27,8 @@ const strictToolResponse = (argumentsValue: unknown) => new Response(JSON.string
 const config = (overrides: Partial<ServerConfig> = {}): ServerConfig => ({
   enabled: true, configured: true, apiKey: 'TOP_SECRET_SERVER_KEY', baseUrl: 'https://example.invalid/v1', model: 'private-model',
   requestTimeoutMs: 50, maxRequestsPerMinute: 10, dailyTokenBudget: 50_000,
-  allowedOrigins: new Set(['http://127.0.0.1:5173']), host: '127.0.0.1', port: 8787, ...overrides,
+  allowedOrigins: new Set(['http://127.0.0.1:5173']), host: '127.0.0.1', port: 8787,
+  deepSeekStrictToolEnabled: false, ...overrides,
 })
 const providerResult = (value: unknown): ServerProviderResult => ({ rawJson: JSON.stringify(value), inputCharacters: 20, outputCharacters: 20, usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 }, upstreamStatus: 200 })
 class FakeProvider implements ServerLlmProvider {
@@ -67,6 +69,25 @@ describe('服务端配置、请求和成本门禁', () => {
   it('启用但缺Key时配置保持不可用', () => {
     const loaded = loadServerConfig({ ENABLE_REAL_LLM: 'true', LLM_BASE_URL: 'https://example.invalid/v1', LLM_MODEL: 'm' }, 'Z:\\missing-medask-config')
     expect(loaded.enabled).toBe(true); expect(loaded.configured).toBe(false); expect(loaded.apiKey).toBe('')
+  })
+  it('Strict默认关闭且HOST、PORT可由生产变量配置', () => {
+    const loaded = loadServerConfig({ HOST: '0.0.0.0', PORT: '9000' }, 'Z:\\missing-medask-config')
+    expect(loaded.deepSeekStrictToolEnabled).toBe(false)
+    expect(loaded.host).toBe('0.0.0.0')
+    expect(loaded.port).toBe(9000)
+  })
+  it('健康检查不依赖真实模型配置', async () => {
+    const server = createMedAskServer(config({ enabled: false, configured: false }), null)
+    await new Promise<void>((resolveListen) => server.listen(0, '127.0.0.1', resolveListen))
+    try {
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('health_test_address_missing')
+      const response = await fetch(`http://127.0.0.1:${address.port}/health`)
+      expect(response.status).toBe(200)
+      await expect(response.json()).resolves.toEqual({ status: 'ok' })
+    } finally {
+      await new Promise<void>((resolveClose) => server.close(() => resolveClose()))
+    }
   })
   it('非JSON Content-Type被拒绝', async () => {
     const fake = new FakeProvider(); const route = createLlmRouter({ config: config(), provider: fake, audit: quietAudit })
@@ -139,6 +160,14 @@ describe('服务端配置、请求和成本门禁', () => {
 })
 
 describe('Provider、严格响应和日志保护', () => {
+  it('DeepSeek Strict关闭时直接使用json_object', async () => {
+    const fetchFn = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => completionResponse(JSON.stringify(validExtract)))
+    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com/v1', model: 'm', fetchFn: fetchFn as typeof fetch })
+    const result = await provider.extractSlots(sanitizeExtractRequest(extractBody()))
+    expect(result.structuredOutputStrategy).toBe('json_object_fallback')
+    expect(String(fetchFn.mock.calls[0][0])).toBe('https://api.deepseek.com/v1/chat/completions')
+    expect(provider.getStructuredOutputStats().strictToolRequestCount).toBe(0)
+  })
   it('API Key只进入服务端Authorization而不进入请求体', async () => {
     const fetchFn = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(validExtract) } }], usage: {} }), { status: 200 }))
     const provider = new OpenAiCompatibleProvider({ apiKey: 'TOP_SECRET_SERVER_KEY', baseUrl: 'https://api.example/v1', model: 'm', fetchFn: fetchFn as typeof fetch })
@@ -150,7 +179,7 @@ describe('Provider、严格响应和日志保护', () => {
   })
   it('DeepSeek strict tool使用Beta端点、强制唯一函数并接受合法参数', async () => {
     const fetchFn = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => strictToolResponse(validExtract))
-    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com/v1', model: 'm', fetchFn: fetchFn as typeof fetch })
+    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com/v1', model: 'm', deepSeekStrictToolEnabled: true, fetchFn: fetchFn as typeof fetch })
     const result = await provider.extractSlots(sanitizeExtractRequest(extractBody()))
     expect(JSON.parse(result.rawJson)).toEqual(validExtract)
     expect(String(fetchFn.mock.calls[0][0])).toBe('https://api.deepseek.com/beta/chat/completions')
@@ -169,7 +198,7 @@ describe('Provider、严格响应和日志保护', () => {
       { ...validExtract, candidates: [{ ...validExtract.candidates[0], status: 'maybe' }] },
     ]
     for (const value of invalidValues) {
-      const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com', model: 'm', fetchFn: vi.fn(async () => strictToolResponse(value)) as typeof fetch })
+      const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com', model: 'm', deepSeekStrictToolEnabled: true, fetchFn: vi.fn(async () => strictToolResponse(value)) as typeof fetch })
       const result = await provider.extractSlots(sanitizeExtractRequest(extractBody()))
       expect(() => validateExtractionProviderResponse(result.rawJson, ['onset'], '我昨天开始发烧')).toThrow()
     }
@@ -178,7 +207,7 @@ describe('Provider、严格响应和日志保护', () => {
     const fetchFn = vi.fn()
       .mockResolvedValueOnce(completionResponse('{}'))
       .mockResolvedValueOnce(completionResponse(JSON.stringify(validExtract)))
-    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com', model: 'm', fetchFn: fetchFn as typeof fetch })
+    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com', model: 'm', deepSeekStrictToolEnabled: true, fetchFn: fetchFn as typeof fetch })
     const result = await provider.extractSlots(sanitizeExtractRequest(extractBody()))
     expect(JSON.parse(result.rawJson)).toEqual(validExtract)
     expect(fetchFn).toHaveBeenCalledTimes(2)
@@ -189,15 +218,27 @@ describe('Provider、严格响应和日志保护', () => {
     const fetchFn = vi.fn()
       .mockResolvedValueOnce(new Response('{}', { status: 400 }))
       .mockResolvedValueOnce(completionResponse(JSON.stringify(validExtract)))
-    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com', model: 'm', fetchFn: fetchFn as typeof fetch })
+    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com', model: 'm', deepSeekStrictToolEnabled: true, fetchFn: fetchFn as typeof fetch })
     await expect(provider.extractSlots(sanitizeExtractRequest(extractBody()))).resolves.toEqual(expect.objectContaining({ structuredOutputStrategy: 'json_object_fallback' }))
     expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+  it('Strict明确不支持后在当前进程内不再尝试', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(new Response('{}', { status: 400 }))
+      .mockResolvedValueOnce(completionResponse(JSON.stringify(validExtract)))
+      .mockResolvedValueOnce(completionResponse(JSON.stringify(validExtract)))
+    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com', model: 'm', deepSeekStrictToolEnabled: true, fetchFn: fetchFn as typeof fetch })
+    await provider.extractSlots(sanitizeExtractRequest(extractBody()))
+    await provider.extractSlots(sanitizeExtractRequest(extractBody({ userText: '今天开始发烧' })))
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+    expect(fetchFn.mock.calls.filter(([url]) => String(url).includes('/beta/'))).toHaveLength(1)
+    expect(provider.getStructuredOutputStats().strictToolRequestCount).toBe(1)
   })
   it('strict tool和json_object都失败时路由安全回退', async () => {
     const fetchFn = vi.fn()
       .mockResolvedValueOnce(new Response('{}', { status: 400 }))
       .mockResolvedValueOnce(new Response('{}', { status: 400 }))
-    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com', model: 'm', fetchFn: fetchFn as typeof fetch })
+    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com', model: 'm', deepSeekStrictToolEnabled: true, fetchFn: fetchFn as typeof fetch })
     const route = createLlmRouter({ config: config({ baseUrl: 'https://api.deepseek.com' }), provider, audit: quietAudit })
     const result = await route(request())
     expect(result.status).toBe(502)
@@ -330,7 +371,7 @@ describe('风险、注入与前端降级', () => {
     try {
       const base = startSession({ age: 30, quickComplaint: 'fever' })
       const result = await answerFreeText(base.session, '普通描述', new SlotExtractionAdapter(new HttpLlmProvider()))
-      expect(result.extractionNotice).toBe('自然语言辅助暂时不可用，已切换为标准问题模式。')
+      expect(result.extractionNotice).toBe('自然语言辅助暂时不可用，你仍可继续按标准问题完成信息整理。')
       expect(result.session.status).toBe('collecting')
     } finally { globalThis.fetch = originalFetch }
   })

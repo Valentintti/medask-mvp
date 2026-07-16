@@ -1,0 +1,22 @@
+services:
+  api:
+    build:
+      context: .
+      target: server
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+    ports:
+      - "8787:8787"
+
+  web:
+    build:
+      context: .
+      target: frontend
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "5173:80"

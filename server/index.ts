@@ -28,7 +28,13 @@ function send(response: ServerResponse, routeResponse: RouteResponse): void {
 
 export function createMedAskServer(config: ServerConfig = loadServerConfig(), providerOverride?: ServerLlmProvider | null) {
   const provider = providerOverride === undefined && config.configured
-    ? new OpenAiCompatibleProvider({ apiKey: config.apiKey, baseUrl: config.baseUrl, model: config.model, requestTimeoutMs: config.requestTimeoutMs })
+    ? new OpenAiCompatibleProvider({
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl,
+        model: config.model,
+        requestTimeoutMs: config.requestTimeoutMs,
+        deepSeekStrictToolEnabled: config.deepSeekStrictToolEnabled,
+      })
     : providerOverride ?? null
   const route = createLlmRouter({ config, provider })
   const hashSalt = randomBytes(32)
@@ -42,6 +48,14 @@ export function createMedAskServer(config: ServerConfig = loadServerConfig(), pr
     request.on('aborted', () => controller.abort(new Error('client_aborted')))
     try {
       const path = new URL(request.url ?? '/', `http://${request.headers.host ?? '127.0.0.1'}`).pathname
+      if (request.method === 'GET' && path === '/health') {
+        send(response, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
+          body: { status: 'ok' },
+        })
+        return
+      }
       const bodyText = ['POST', 'PUT', 'PATCH'].includes(request.method ?? '') ? await readBody(request) : ''
       send(response, await route({
         method: request.method ?? 'GET', path, origin: request.headers.origin ?? null,

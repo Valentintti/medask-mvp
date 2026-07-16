@@ -41,10 +41,6 @@ function deepSeekBetaCompletionEndpoint(baseUrl: string): string {
   return url.toString()
 }
 
-function shouldPreferDeepSeekStrict(baseUrl: string): boolean {
-  try { return new URL(baseUrl).hostname.toLowerCase().endsWith('deepseek.com') } catch { return false }
-}
-
 function usageFrom(value: unknown): ProviderUsage {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return { inputTokens: null, outputTokens: null, totalTokens: null }
   const record = value as Record<string, unknown>
@@ -113,6 +109,7 @@ export interface OpenAiCompatibleProviderOptions {
   requestTimeoutMs?: number
   fetchFn?: FetchLike
   extractionStrategy?: ExtractionOutputStrategy
+  deepSeekStrictToolEnabled?: boolean
 }
 
 function retryAfterMilliseconds(response: Response): number | null {
@@ -188,6 +185,7 @@ export class OpenAiCompatibleProvider implements ServerLlmProvider {
   private strictToolRequestCount = 0
   private jsonObjectFallbackCount = 0
   private readonly strictFallbackReasonCounts: Record<string, number> = {}
+  private strictCapability: 'unknown' | 'supported' | 'unsupported' = 'unknown'
 
   constructor(private readonly options: OpenAiCompatibleProviderOptions) { this.fetchFn = options.fetchFn ?? fetch }
 
@@ -201,9 +199,9 @@ export class OpenAiCompatibleProvider implements ServerLlmProvider {
 
   extractSlots(input: SlotExtractionRequest, signal?: AbortSignal): Promise<ServerProviderResult> {
     const strategy = this.options.extractionStrategy
-      ?? (shouldPreferDeepSeekStrict(this.options.baseUrl) ? 'deepseek_strict_tool' : 'json_object_fallback')
+      ?? (this.options.deepSeekStrictToolEnabled === true ? 'deepseek_strict_tool' : 'json_object_fallback')
     return this.withTotalTimeout(signal, async (requestSignal, deadline) => {
-      if (strategy === 'deepseek_strict_tool') {
+      if (strategy === 'deepseek_strict_tool' && this.strictCapability !== 'unsupported') {
         this.strictToolRequestCount += 1
         try {
           const completion = await this.requestCompletion(
@@ -213,10 +211,13 @@ export class OpenAiCompatibleProvider implements ServerLlmProvider {
             deadline,
           )
           const extracted = extractStrictToolArguments(completion.bodyText)
+          this.strictCapability = 'supported'
           return this.result(extracted.rawJson, extracted.usage, completion.status, SLOT_EXTRACTION_SYSTEM_PROMPT, buildSlotExtractionPrompt(input), 'deepseek_strict_tool')
         } catch (error) {
           if (!canFallbackFromStrict(error)) throw error
           const reason = error instanceof ProviderRequestError ? error.code : 'unknown'
+          // 当前服务进程内缓存明确的 4xx 不支持结果，避免每次请求重复触发已知失败。
+          if (reason === 'provider_request_rejected') this.strictCapability = 'unsupported'
           this.strictFallbackReasonCounts[reason] = (this.strictFallbackReasonCounts[reason] ?? 0) + 1
           this.jsonObjectFallbackCount += 1
         }

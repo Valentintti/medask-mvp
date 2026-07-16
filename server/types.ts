@@ -5,6 +5,7 @@ export interface ServerConfig {
   enabled: boolean; configured: boolean; apiKey: string; baseUrl: string; model: string
   requestTimeoutMs: number; maxRequestsPerMinute: number; dailyTokenBudget: number
   allowedOrigins: ReadonlySet<string>; host: string; port: number
+  deepSeekStrictToolEnabled: boolean
 }
 export interface ProviderUsage { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null }
 export interface ServerProviderResult {

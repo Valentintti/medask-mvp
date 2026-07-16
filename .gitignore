@@ -5,6 +5,9 @@ coverage/
 .vite/
 *.local
 *.log
+reports/
+tmp/
+evaluation-results/
 .env
 .env.*
 !.env.example

@@ -26,6 +26,8 @@
 
 ## 限流、预算、超时和降级
 
+DeepSeek Strict Function Calling 由服务端变量 `DEEPSEEK_STRICT_TOOL_ENABLED` 控制，默认关闭。关闭时槽位提取直接使用 `json_object`，并继续执行相同的 Schema、evidence 与 Harness 校验。显式开启后，如 Strict 端点首次返回明确的请求不支持错误，Provider 会在当前服务进程内缓存 `unsupported`，后续请求不再重复调用 Beta 端点；进程重启后能力缓存重置。
+
 - 每个内存客户端键每分钟默认最多 10 次；IP 只用于加盐不可逆哈希，不写日志。
 - 相同操作短时间内只允许一次，前端每轮最多一次提取、每题最多一次改写。
 - 中文字符按约 2 字符/Token 做保守估算；这是 Demo 预算门禁，不是精确计费器。

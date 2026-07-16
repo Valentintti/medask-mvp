@@ -50,7 +50,7 @@ export function IntakePage({
 
       <div className="chat-context">
         <div className="assistant-avatar">M</div>
-        <p>我只会按固定规则追问必要信息。遇到风险表达会停止普通流程。</p>
+        <p>请按实际情况回答。系统会在最多 {session.maxTurns} 轮内整理已提供的信息。</p>
       </div>
 
       <QuestionCard

@@ -1,6 +1,6 @@
 # MedAsk 患者端预问诊 MVP
 
-MedAsk 是一个面向演示和产品验证的成人预问诊信息整理工具。流程与风险始终由透明、确定性的规则驱动；可选模型仅提出槽位候选或改写非风险问题。系统只把用户提供的信息整理成结构化摘要，不进行疾病诊断、疾病概率估计、药物推荐、剂量建议或治疗方案生成。
+MedAsk 是一个面向演示和产品验证的成人预问诊信息整理工具：**帮助患者在就医前整理症状信息**。流程与风险始终由透明、确定性的规则驱动；可选模型仅提出槽位候选或改写非风险问题。系统只把用户提供的信息整理成结构化摘要，不进行疾病诊断、疾病概率估计、药物推荐、剂量建议或治疗方案生成。
 
 ## 产品定位与目标用户
 
@@ -120,6 +120,10 @@ pnpm dev
 
 `pnpm dev` 同时启动 Vite 前端和 `http://127.0.0.1:8787` 服务端。也可分别运行 `pnpm dev:client`、`pnpm dev:server`。若要在本机试用真实模式，请复制 `.env.example` 为 `.env`，自行填写 Key、Base URL、Model，并明确设置 `ENABLE_REAL_LLM=true`；不要提交 `.env`。
 
+DeepSeek Strict Function Calling 默认关闭：`DEEPSEEK_STRICT_TOOL_ENABLED=false`。当前 Provider 会直接使用 `json_object`，结果仍经过服务端 Schema、evidence 和 Harness 校验。只有确认账户与模型支持时才显式改为 `true`；若首次返回明确不支持，当前服务进程会缓存该能力状态，后续请求直接使用 JSON 模式。
+
+开发环境显示纯规则、Mock、Real 和三个合成演示案例；生产构建不显示 Mock、Demo 开关或 Trace。生产页面会根据 `/api/llm/status` 在“自然语言辅助可用”和“当前使用标准规则模式”之间切换，不展示模型品牌、置信度、Schema 或内部规则。
+
 ## 测试与构建
 
 ```bash
@@ -131,6 +135,37 @@ pnpm eval:real
 测试覆盖主诉识别、局部否定与转折、动态槽位、共享槽位、7 轮上限、风险升级、用户原文与系统输出隔离、缺失信息分类、数值双层校验、安全错误边界、Trace 状态变化和页面完整流程。
 
 `pnpm build` 会分别构建浏览器和服务端产物，并扫描浏览器 bundle，防止服务端 Key 或内部配置标记被打包。`pnpm eval:real` 在没有完整本机配置时安全跳过，不调用 API；配置后也只对合成文本运行三轮工程评测，不使用真实患者数据。
+
+## 生产构建与 Docker
+
+本地生产构建：
+
+```bash
+pnpm build
+node dist-server/index.js
+```
+
+服务端默认监听 `127.0.0.1:8787`，可通过 `HOST`、`PORT` 修改。健康检查为 `GET http://127.0.0.1:8787/health`。前端构建产物位于 `dist/`，应由静态服务器提供，并将同源 `/api` 反向代理到服务端。
+
+Docker Compose 会构建独立的 Nginx 前端和 Node 服务端：
+
+```bash
+copy .env.example .env
+# 仅在本机 .env 填写服务端配置，不要提交
+docker compose up --build
+```
+
+- 前端：`http://127.0.0.1:5173/`
+- 服务端：`http://127.0.0.1:8787/`
+- 健康检查：`http://127.0.0.1:8787/health`
+
+生产变量示例分别位于 `deploy/frontend.env.example` 与 `deploy/server.env.example`。`.dockerignore` 排除了 `.env`、日志、覆盖率、构建产物和评测临时结果；真实 Key 只存在于部署环境，不写入镜像层或 Git。
+
+## 产品展示材料
+
+- [`docs/product-case-study.md`](docs/product-case-study.md)：数据治理、Human-in-the-loop、规则/模型架构与产品取舍。
+- [`docs/demo-script.md`](docs/demo-script.md)：3—5 分钟面试演示脚本。
+- [`docs/evaluation-summary.md`](docs/evaluation-summary.md)：规则、Mock 和真实 DeepSeek 的工程评测口径与限制。
 
 ## 下一阶段建议
 
