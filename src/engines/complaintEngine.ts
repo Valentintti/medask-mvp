@@ -2,6 +2,17 @@ import { complaintRules } from '../data/complaintRules'
 import type { AnswerValue, ComplaintId } from '../types/intake'
 import { findTermOccurrences, hasAffirmedTerm, type TermOccurrence } from './contextMatcher'
 
+const RECENT_TIME_PATTERN = /(?:今天|昨天|前天|最近|这两天|这几天)/u
+const DISTANT_HISTORY_PATTERN = /(?:去年|前年|多年前|小时候|童年|小时侯)/u
+const FEVER_EVENT_PATTERN = /(?:发烧|发热|高烧|低烧|烧到|体温(?:升高|高)|3[5-9](?:\.\d)?\s*(?:℃|度)|4[0-3](?:\.\d)?\s*(?:℃|度))/u
+const FEVER_RESOLVED_PATTERN = /(?:退烧|退热|烧退了|体温(?:已经|已)?恢复正常|现在(?:已经)?好了)/u
+
+export function isRecentResolvedFever(text: string): boolean {
+  const normalized = text.trim()
+  if (!normalized || DISTANT_HISTORY_PATTERN.test(normalized)) return false
+  return RECENT_TIME_PATTERN.test(normalized) && FEVER_EVENT_PATTERN.test(normalized) && FEVER_RESOLVED_PATTERN.test(normalized)
+}
+
 function isLocalHeatExpression(text: string, occurrence: TermOccurrence): boolean {
   const context = text.slice(
     Math.max(0, occurrence.index - 4),
@@ -18,7 +29,7 @@ export function detectComplaints(text: string): ComplaintId[] {
   if (
     hasAffirmedTerm(normalized, complaintRules.fever.terms, (occurrence) =>
       isLocalHeatExpression(normalized, occurrence),
-    )
+    ) || isRecentResolvedFever(normalized)
   ) {
     matches.push('fever')
   }
@@ -26,6 +37,13 @@ export function detectComplaints(text: string): ComplaintId[] {
     matches.push('cough')
   }
   return matches
+}
+
+export function detectFeverCurrentStatus(text: string): 'current' | 'resolved' | 'unknown' {
+  if (isRecentResolvedFever(text)) return 'resolved'
+  return hasAffirmedTerm(text, complaintRules.fever.terms, (occurrence) =>
+    isLocalHeatExpression(text, occurrence),
+  ) ? 'current' : 'unknown'
 }
 
 function extractOnset(text: string): string | null {

@@ -1,5 +1,6 @@
 import type { ComplaintId } from '../types/intake'
 import { demoCases, type DemoCase } from '../data/demoCases'
+import { INITIAL_DESCRIPTION_MAX_LENGTH, INITIAL_DESCRIPTION_WARNING_LENGTH } from '../data/intakeLimits'
 
 interface WelcomePageProps {
   age: string
@@ -63,7 +64,14 @@ export function WelcomePage({
           onChange={(event) => onTextChange(event.target.value)}
           placeholder="例如：我昨天开始发烧，现在38.5度"
           rows={3}
+          maxLength={INITIAL_DESCRIPTION_MAX_LENGTH}
         />
+        <div className={`character-count ${initialText.length >= INITIAL_DESCRIPTION_WARNING_LENGTH ? 'near-limit' : ''}`}>
+          <span>{initialText.length} / {INITIAL_DESCRIPTION_MAX_LENGTH}</span>
+          {initialText.length >= INITIAL_DESCRIPTION_WARNING_LENGTH && (
+            <small>接近字符上限，请优先保留时间、症状和已采取措施。</small>
+          )}
+        </div>
 
         <div className="quick-start">
           <button disabled={!canStart} onClick={() => onStart('fever')}>

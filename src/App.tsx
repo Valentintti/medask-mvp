@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SafetyBanner } from './components/SafetyBanner'
+import { AnswerEditor } from './components/AnswerEditor'
 import { TracePanel } from './components/TracePanel'
 import {
   answerCurrentSlot,
   answerFreeText,
   createSafeErrorResult,
+  editSessionAnswer,
   skipCurrentSlot,
   startSession,
 } from './harness/intakeController'
 import { createIntakeSession } from './harness/sessionState'
 import { recordProductEvent } from './harness/productEventLogger'
 import type { DemoCase } from './data/demoCases'
+import { INITIAL_DESCRIPTION_MAX_LENGTH } from './data/intakeLimits'
 import { appendLlmTrace } from './llm/llmTrace'
 import { MockLlmProvider } from './llm/mockProvider'
 import { HttpLlmProvider } from './llm/httpProvider'
@@ -37,6 +40,8 @@ export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: b
   const [displayQuestion, setDisplayQuestion] = useState<string | null>(null)
   const [llmBusy, setLlmBusy] = useState(false)
   const [llmServiceNotice, setLlmServiceNotice] = useState<string | null>(null)
+  const [editingAnswers, setEditingAnswers] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
   const pendingExtractionRef = useRef<AbortController | null>(null)
   const sessionGenerationRef = useRef(0)
   const extractionOperationKeysRef = useRef(new Set<string>())
@@ -134,6 +139,7 @@ export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: b
       if (next.session.status === 'escalated') recordProductEvent('risk_escalated')
       if (next.session.status === 'completed') recordProductEvent('summary_completed')
       setResult(next)
+      setEditingAnswers(false)
     } catch {
       setResult(createSafeErrorResult(createIntakeSession(Number(age)), 'controller.start_error'))
     }
@@ -149,6 +155,8 @@ export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: b
     setInitialText('')
     setLlmServiceNotice(null)
     setResult(null)
+    setEditingAnswers(false)
+    setEditError(null)
     recordProductEvent('session_restarted')
   }
 
@@ -174,6 +182,26 @@ export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: b
       setResult(next)
     } catch {
       setResult(createSafeErrorResult(result.session, 'controller.skip_error'))
+    }
+  }
+
+  const editAnswer = (slotId: string, value: AnswerValue) => {
+    if (!result) return
+    try {
+      const next = editSessionAnswer(result.session, slotId, value)
+      if (next.validationError) {
+        setEditError(next.validationError)
+        return
+      }
+      setEditError(null)
+      setResult(next)
+      if (next.session.status === 'escalated') {
+        setEditingAnswers(false)
+        recordProductEvent('risk_escalated')
+      }
+    } catch {
+      setEditingAnswers(false)
+      setResult(createSafeErrorResult(result.session, 'controller.edit_error'))
     }
   }
 
@@ -227,14 +255,14 @@ export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: b
           age={age}
           initialText={initialText}
           onAgeChange={setAge}
-          onTextChange={setInitialText}
+          onTextChange={(value) => setInitialText(value.slice(0, INITIAL_DESCRIPTION_MAX_LENGTH))}
           onStart={begin}
           adapterMode={adapterMode}
           realLlmAvailable={realLlmAvailable}
           questionMode={questionMode}
           onAdapterModeChange={(mode) => { setLlmServiceNotice(null); setAdapterMode(mode === 'mock' && !import.meta.env.DEV ? 'rules' : mode) }}
           onQuestionModeChange={setQuestionMode}
-          onDemoSelect={(demo: DemoCase) => { setAge(String(demo.age)); setInitialText(demo.text) }}
+          onDemoSelect={(demo: DemoCase) => { setAge(String(demo.age)); setInitialText(demo.text.slice(0, INITIAL_DESCRIPTION_MAX_LENGTH)) }}
           staticDemo={staticDemo}
         />
       )}
@@ -252,6 +280,7 @@ export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: b
           extractionNotice={result.extractionNotice ?? llmServiceNotice}
           clarificationQuestion={result.clarificationQuestion}
           onFreeText={answerWithLlm}
+          onEditAnswers={() => { setEditError(null); setEditingAnswers(true) }}
         />
       )}
 
@@ -260,12 +289,12 @@ export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: b
       )}
 
       {result?.session.status === 'completed' && result.summary && (
-        <SummaryPage summary={result.summary} onRestart={restart} />
+        <SummaryPage summary={result.summary} onRestart={restart} onEdit={() => { setEditError(null); setEditingAnswers(true) }} />
       )}
 
       {result?.session.status === 'unsupported' && (
         <main className="result-page unsupported-page">
-          <span className="eyebrow">OUT OF DEMO SCOPE</span>
+          <span className="eyebrow">当前不在支持范围</span>
           <h1>当前规则无法继续</h1>
           <p className="result-message">{result.message}</p>
           <button onClick={restart}>返回首页</button>
@@ -274,10 +303,19 @@ export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: b
 
       {result?.session.status === 'error' && <SafeErrorPage onRestart={restart} />}
 
+      {editingAnswers && result && (result.session.status === 'collecting' || result.session.status === 'completed') && (
+        <AnswerEditor
+          session={result.session}
+          error={editError}
+          onSave={editAnswer}
+          onClose={() => { setEditingAnswers(false); setEditError(null) }}
+        />
+      )}
+
       {import.meta.env.DEV && !staticDemo && result && (
         <TracePanel events={result.session.traceEvents} llmEvents={result.session.llmTraceEvents} />
       )}
-      <footer>MedAsk · 就医前信息整理 Demo</footer>
+      <footer>MedAsk · 就医前信息整理演示版</footer>
     </div>
   )
 }

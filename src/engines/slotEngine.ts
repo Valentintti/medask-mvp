@@ -101,3 +101,32 @@ export function validateSlotAnswer(slot: SlotDefinition, value: AnswerValue): Sl
 
   return { valid: true, message: null }
 }
+
+export function reconcileConditionalSlots(session: IntakeSession): IntakeSession {
+  const answers = { ...session.answers }
+  const notApplicable = new Set<string>()
+  const clearedSlotIds = new Set<string>()
+
+  for (const slot of getSessionSlots(session)) {
+    if (!slot.showWhen) continue
+    const dependency = answers[slot.showWhen.slotId]
+    if (dependency !== undefined && !sameAnswer(dependency, slot.showWhen.equals)) {
+      notApplicable.add(slot.id)
+      if (answers[slot.id] !== undefined) {
+        delete answers[slot.id]
+        clearedSlotIds.add(slot.id)
+      }
+    }
+  }
+
+  return {
+    ...session,
+    answers,
+    notApplicableSlotIds: [...notApplicable],
+    skippedSlotIds: session.skippedSlotIds.filter((id) => !notApplicable.has(id)),
+    askedSlotIds: session.askedSlotIds.filter((id) => !clearedSlotIds.has(id)),
+    currentSlotId: session.currentSlotId && notApplicable.has(session.currentSlotId)
+      ? null
+      : session.currentSlotId,
+  }
+}

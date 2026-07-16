@@ -12,6 +12,8 @@ export type SessionStatus =
 
 export type PatientGroup = 'adult_18_65' | 'unsupported_age' | 'unknown'
 
+export type FeverCurrentStatus = 'current' | 'resolved' | 'unknown'
+
 export type AnswerValue = string | number | boolean | string[]
 
 export type SlotInputType = 'text' | 'number' | 'boolean' | 'singleSelect'
@@ -21,6 +23,7 @@ export type TraceEventType =
   | 'risk_checked'
   | 'complaint_matched'
   | 'slot_answered'
+  | 'slot_edited'
   | 'slot_skipped'
   | 'question_selected'
   | 'escalated'
@@ -89,6 +92,7 @@ export interface IntakeSession {
   status: SessionStatus
   escalationReason: string | null
   initialNarrative?: string
+  feverCurrentStatus?: FeverCurrentStatus
   traceEvents: TraceEvent[]
   llmTraceEvents: LlmTraceEvent[]
 }

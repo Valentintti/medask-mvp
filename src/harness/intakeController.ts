@@ -1,6 +1,6 @@
-import { detectComplaints, extractInitialAnswers } from '../engines/complaintEngine'
+import { detectComplaints, detectFeverCurrentStatus, extractInitialAnswers } from '../engines/complaintEngine'
 import { checkStructuredRisk, checkTextRisk } from '../engines/riskEngine'
-import { getSessionSlots, selectNextSlot, validateSlotAnswer } from '../engines/slotEngine'
+import { getSessionSlots, reconcileConditionalSlots, selectNextSlot, validateSlotAnswer } from '../engines/slotEngine'
 import { createSummary } from '../engines/summaryEngine'
 import { formatAnswerValue } from '../engines/answerFormatter'
 import { MODEL_BLOCKED_RISK_SLOT_IDS } from '../llm/acceptancePolicy'
@@ -167,6 +167,9 @@ export function startSession(input: StartSessionInput): ControllerResult {
     chiefComplaints: complaints,
     initialNarrative: initialText || undefined,
     answers: initialText ? extractInitialAnswers(initialText, complaints) : {},
+    feverCurrentStatus: complaints.includes('fever')
+      ? detectFeverCurrentStatus(initialText)
+      : 'unknown',
   }
   session = appendTrace(session, {
     eventType: 'complaint_matched',
@@ -176,6 +179,66 @@ export function startSession(input: StartSessionInput): ControllerResult {
   })
 
   return selectQuestion(session)
+}
+
+export function editSessionAnswer(
+  session: IntakeSession,
+  slotId: string,
+  value: AnswerValue,
+): ControllerResult {
+  const slot = getSessionSlot(session, slotId)
+  if (!slot || session.answers[slotId] === undefined) {
+    return {
+      session,
+      question: currentQuestion(session),
+      summary: session.status === 'completed' ? createSummary(session) : null,
+      message: '只能修改已经填写的信息。',
+      validationError: '只能修改已经填写的信息。',
+    }
+  }
+
+  const validation = validateSlotAnswer(slot, value)
+  if (!validation.valid) {
+    return {
+      session,
+      question: currentQuestion(session),
+      summary: session.status === 'completed' ? createSummary(session) : null,
+      message: validation.message ?? '请输入有效信息。',
+      validationError: validation.message,
+    }
+  }
+
+  let next = reconcileConditionalSlots({
+    ...session,
+    answers: { ...session.answers, [slotId]: value },
+    skippedSlotIds: session.skippedSlotIds.filter((id) => id !== slotId),
+  })
+  next = appendTrace(next, {
+    eventType: 'slot_edited',
+    input: { slotId, valueType: typeof value },
+    decision: '修改已填写信息并重新计算条件槽位',
+    ruleId: `slot.${slotId}.edit`,
+  })
+
+  const risk = riskFromAnswer(slot, value)
+  next = traceRiskCheck(next, risk, `edited_slot:${slotId}`)
+  if (risk.matched) return escalate(next, risk)
+
+  if (session.status === 'completed') {
+    return {
+      session: next,
+      question: null,
+      summary: createSummary(next),
+      message: '已更新信息摘要。',
+    }
+  }
+
+  return {
+    session: next,
+    question: currentQuestion(next),
+    summary: null,
+    message: '已更新已填信息。',
+  }
 }
 
 function riskFromAnswer(slot: SlotDefinition, value: AnswerValue): RiskResult {

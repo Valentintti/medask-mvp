@@ -26,7 +26,7 @@ function SummarySection({
   )
 }
 
-export function SummaryPage({ summary, onRestart }: { summary: IntakeSummary; onRestart: () => void }) {
+export function SummaryPage({ summary, onRestart, onEdit }: { summary: IntakeSummary; onRestart: () => void; onEdit?: () => void }) {
   const copySummary = async () => {
     const lines = [
       `患者类型：${summary.patientType}`,
@@ -44,7 +44,7 @@ export function SummaryPage({ summary, onRestart }: { summary: IntakeSummary; on
 
   return (
     <main className="summary-page">
-      <span className="eyebrow">STRUCTURED HANDOFF</span>
+      <span className="eyebrow">结构化信息摘要</span>
       <h1>信息整理摘要</h1>
       <div className="summary-overview">
         <div><span>患者类型</span><strong>{summary.patientType}</strong></div>
@@ -67,6 +67,7 @@ export function SummaryPage({ summary, onRestart }: { summary: IntakeSummary; on
 
       <p className="summary-disclaimer">{summary.disclaimer}</p>
       <div className="summary-actions">
+        {onEdit && <button className="secondary-action" onClick={onEdit}>返回修改</button>}
         <button onClick={() => void copySummary()}>复制摘要</button>
         <button className="secondary-action" onClick={() => window.print()}>打印或保存为 PDF</button>
         <button className="secondary-action" onClick={onRestart}>重新开始</button>

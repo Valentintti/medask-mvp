@@ -14,6 +14,7 @@ interface IntakePageProps {
   extractionNotice?: string | null
   clarificationQuestion?: string | null
   onFreeText?: (text: string) => Promise<void>
+  onEditAnswers: () => void
 }
 
 export function IntakePage({
@@ -28,12 +29,13 @@ export function IntakePage({
   extractionNotice,
   clarificationQuestion,
   onFreeText,
+  onEditAnswers,
 }: IntakePageProps) {
   return (
     <main className="intake-page">
       <header className="session-header">
         <div>
-          <span className="eyebrow">INFORMATION COLLECTION</span>
+          <span className="eyebrow">信息收集中</span>
           <h1>预问诊信息整理</h1>
         </div>
         <div className="turn-counter" aria-label="问诊轮次">
@@ -47,6 +49,9 @@ export function IntakePage({
           <span key={complaint}>{complaint === 'fever' ? '发热' : '咳嗽'}</span>
         ))}
       </div>
+      <button type="button" className="secondary-action edit-answers-button" onClick={onEditAnswers}>
+        查看/修改已填信息
+      </button>
 
       <div className="chat-context">
         <div className="assistant-avatar">M</div>

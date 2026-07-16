@@ -44,6 +44,14 @@ export function createSummary(session: IntakeSession): IntakeSummary {
   }
 
   const currentSymptoms = toEntries(session, 'current')
+  if (session.feverCurrentStatus === 'resolved') {
+    currentSymptoms.unshift({
+      label: '本次发热状态',
+      value: 'resolved',
+      displayValue: '本次发热目前已缓解',
+      source: 'user',
+    })
+  }
   if (session.initialNarrative) {
     currentSymptoms.unshift({
       label: '用户首句描述',
