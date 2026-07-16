@@ -136,18 +136,29 @@ pnpm eval:real
 
 `pnpm build` 会分别构建浏览器和服务端产物，并扫描浏览器 bundle，防止服务端 Key 或内部配置标记被打包。`pnpm eval:real` 在没有完整本机配置时安全跳过，不调用 API；配置后也只对合成文本运行三轮工程评测，不使用真实患者数据。
 
-## 生产构建与 Docker
+## 生产构建与 Railway Railpack
 
 本地生产构建：
 
 ```bash
 pnpm build
-node dist-server/index.js
+pnpm start
 ```
 
-服务端默认监听 `127.0.0.1:8787`，可通过 `HOST`、`PORT` 修改。健康检查为 `GET http://127.0.0.1:8787/health`。前端构建产物位于 `dist/`，应由静态服务器提供，并将同源 `/api` 反向代理到服务端。
+生产 Node 服务默认监听 `0.0.0.0:8787`，优先使用环境变量 `HOST`、`PORT`。它在同一端口提供 `dist/` 前端、SPA 路由、`/api/llm/*` 和 `/health`；浏览器生产请求始终使用同源 `/api`。Railway 会自动注入 `PORT`，不要在 Railway Variables 中手动设置。
 
-Docker Compose 会构建独立的 Nginx 前端和 Node 服务端：
+`railway.json` 明确使用 Railpack：
+
+- Build Command：`pnpm build`
+- Start Command：`pnpm start`
+- Health Check Path：`/health`
+- Restart Policy：`ON_FAILURE`
+
+Railway Variables 需配置：`ENABLE_REAL_LLM`、`LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`、`DEEPSEEK_STRICT_TOOL_ENABLED`、`LLM_REQUEST_TIMEOUT_MS`、`LLM_MAX_REQUESTS_PER_MINUTE`、`LLM_DAILY_TOKEN_BUDGET`、`HOST`。获得 Railway HTTPS 域名后，再将该域名加入 `ALLOWED_ORIGINS`（若保留跨源限制）。Key 只在 Railway 后台填写，不写入仓库。
+
+## 可选本地 Docker 方案
+
+Railway 不使用 Docker。根目录不再存在 `Dockerfile`；可选的本地 Compose 方案明确使用 `deploy/Dockerfile.local`，仍构建独立的 Nginx 前端和 Node 服务端：
 
 ```bash
 copy .env.example .env

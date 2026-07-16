@@ -2,6 +2,7 @@ services:
   api:
     build:
       context: .
+      dockerfile: deploy/Dockerfile.local
       target: server
     env_file:
       - .env
@@ -14,6 +15,7 @@ services:
   web:
     build:
       context: .
+      dockerfile: deploy/Dockerfile.local
       target: frontend
     depends_on:
       api:

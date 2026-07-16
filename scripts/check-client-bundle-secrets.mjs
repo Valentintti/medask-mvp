@@ -13,12 +13,18 @@ function collect(directory) {
 collect(root)
 
 const configuredKey = process.env.LLM_API_KEY?.trim()
+const configuredBaseUrl = process.env.LLM_BASE_URL?.trim()
 const forbidden = [
   'VITE_LLM_API_KEY',
   'TOP_SECRET_SERVER_KEY',
   'Authorization: Bearer',
   '你是MedAsk服务端的槽位提取器',
+  'http://127.0.0.1',
+  'https://127.0.0.1',
+  'http://localhost',
+  'https://localhost',
   ...(configuredKey ? [configuredKey] : []),
+  ...(configuredBaseUrl ? [configuredBaseUrl] : []),
 ]
 for (const path of files) {
   const content = readFileSync(path, 'utf8')

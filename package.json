@@ -7,6 +7,7 @@
     "dev": "node scripts/dev.mjs",
     "dev:client": "vite --host 127.0.0.1",
     "dev:server": "tsx watch server/index.ts",
+    "start": "node dist-server/index.js",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json",
     "build:client": "vite build && node scripts/check-client-bundle-secrets.mjs",
     "build:server": "vite build --config vite.server.config.ts",

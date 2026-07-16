@@ -6,6 +6,7 @@ import { loadServerConfig } from './config'
 import { OpenAiCompatibleProvider } from './providers/openAiCompatibleProvider'
 import { createLlmRouter } from './routes/llmRoutes'
 import { MAX_REQUEST_BODY_BYTES } from './security/requestSanitizer'
+import { safeRequestPath, serveStaticRequest } from './staticFiles'
 import type { RouteResponse, ServerConfig, ServerLlmProvider } from './types'
 
 function readBody(request: IncomingMessage): Promise<string> {
@@ -26,7 +27,11 @@ function send(response: ServerResponse, routeResponse: RouteResponse): void {
   response.end(routeResponse.body === null ? undefined : JSON.stringify(routeResponse.body))
 }
 
-export function createMedAskServer(config: ServerConfig = loadServerConfig(), providerOverride?: ServerLlmProvider | null) {
+export function createMedAskServer(
+  config: ServerConfig = loadServerConfig(),
+  providerOverride?: ServerLlmProvider | null,
+  staticRoot = resolve(process.cwd(), 'dist'),
+) {
   const provider = providerOverride === undefined && config.configured
     ? new OpenAiCompatibleProvider({
         apiKey: config.apiKey,
@@ -47,7 +52,15 @@ export function createMedAskServer(config: ServerConfig = loadServerConfig(), pr
     const controller = new AbortController()
     request.on('aborted', () => controller.abort(new Error('client_aborted')))
     try {
-      const path = new URL(request.url ?? '/', `http://${request.headers.host ?? '127.0.0.1'}`).pathname
+      const path = safeRequestPath(request.url)
+      if (!path) {
+        send(response, {
+          status: 400,
+          headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
+          body: { error: { code: 'invalid_path', message: '请求路径无效。' } },
+        })
+        return
+      }
       if (request.method === 'GET' && path === '/health') {
         send(response, {
           status: 200,
@@ -56,12 +69,25 @@ export function createMedAskServer(config: ServerConfig = loadServerConfig(), pr
         })
         return
       }
-      const bodyText = ['POST', 'PUT', 'PATCH'].includes(request.method ?? '') ? await readBody(request) : ''
-      send(response, await route({
-        method: request.method ?? 'GET', path, origin: request.headers.origin ?? null,
-        contentType: request.headers['content-type'] ?? null,
-        clientKey: clientKey(request), bodyText, signal: controller.signal,
-      }))
+      const isApiPath = path === '/api' || path.startsWith('/api/')
+      if (isApiPath) {
+        const bodyText = ['POST', 'PUT', 'PATCH'].includes(request.method ?? '') ? await readBody(request) : ''
+        send(response, await route({
+          method: request.method ?? 'GET', path, origin: request.headers.origin ?? null,
+          contentType: request.headers['content-type'] ?? null,
+          clientKey: clientKey(request), bodyText, signal: controller.signal,
+        }))
+        return
+      }
+      if (request.method === 'GET' || request.method === 'HEAD') {
+        await serveStaticRequest(request, response, staticRoot, path)
+        return
+      }
+      send(response, {
+        status: 404,
+        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
+        body: { error: { code: 'not_found', message: '请求无法处理。' } },
+      })
     } catch (error) {
       const tooLarge = error instanceof Error && error.message === 'request_too_large'
       send(response, {

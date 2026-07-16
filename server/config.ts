@@ -41,7 +41,7 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env, c
     maxRequestsPerMinute: integer(value('LLM_MAX_REQUESTS_PER_MINUTE'), 10, 1, 120),
     dailyTokenBudget: integer(value('LLM_DAILY_TOKEN_BUDGET'), 50000, 1000, 10_000_000),
     allowedOrigins: new Set(configuredOrigins),
-    host: value('HOST').trim() || value('LLM_SERVER_HOST').trim() || '127.0.0.1',
+    host: value('HOST').trim() || value('LLM_SERVER_HOST').trim() || '0.0.0.0',
     port: integer(value('PORT') || value('LLM_SERVER_PORT'), 8787, 1, 65535),
     deepSeekStrictToolEnabled: value('DEEPSEEK_STRICT_TOOL_ENABLED').trim().toLowerCase() === 'true',
   }
