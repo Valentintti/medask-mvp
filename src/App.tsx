@@ -11,6 +11,7 @@ import {
 import { createIntakeSession } from './harness/sessionState'
 import { appendLlmTrace } from './llm/llmTrace'
 import { MockLlmProvider } from './llm/mockProvider'
+import { HttpLlmProvider } from './llm/httpProvider'
 import { QuestionRewriteAdapter } from './llm/questionRewriteAdapter'
 import { SlotExtractionAdapter } from './llm/slotExtractionAdapter'
 import { LLM_SCHEMA_VERSION } from './llm/types'
@@ -25,22 +26,45 @@ export default function App() {
   const [age, setAge] = useState('30')
   const [initialText, setInitialText] = useState('')
   const [result, setResult] = useState<ControllerResult | null>(null)
-  const [mockNluEnabled, setMockNluEnabled] = useState(false)
-  const [questionMode, setQuestionMode] = useState<'canonical' | 'mockRewrite'>('canonical')
+  const [adapterMode, setAdapterMode] = useState<'rules' | 'mock' | 'real'>('rules')
+  const [realLlmAvailable, setRealLlmAvailable] = useState(false)
+  const [questionMode, setQuestionMode] = useState<'canonical' | 'rewrite'>('canonical')
   const [displayQuestion, setDisplayQuestion] = useState<string | null>(null)
-  const [mockBusy, setMockBusy] = useState(false)
+  const [llmBusy, setLlmBusy] = useState(false)
+  const [llmServiceNotice, setLlmServiceNotice] = useState<string | null>(null)
   const pendingExtractionRef = useRef<AbortController | null>(null)
   const sessionGenerationRef = useRef(0)
+  const extractionOperationKeysRef = useRef(new Set<string>())
+  const rewriteQuestionCacheRef = useRef(new Map<string, string>())
   const mockProvider = useMemo(() => new MockLlmProvider(), [])
-  const extractionAdapter = useMemo(() => new SlotExtractionAdapter(mockProvider), [mockProvider])
-  const rewriteAdapter = useMemo(() => new QuestionRewriteAdapter(mockProvider), [mockProvider])
+  const httpProvider = useMemo(() => new HttpLlmProvider(), [])
+  const activeProvider = adapterMode === 'mock' ? mockProvider : adapterMode === 'real' ? httpProvider : null
+  const extractionAdapter = useMemo(() => activeProvider ? new SlotExtractionAdapter(activeProvider, { timeoutMs: 8500 }) : null, [activeProvider])
+  const rewriteAdapter = useMemo(() => activeProvider ? new QuestionRewriteAdapter(activeProvider, 8500) : null, [activeProvider])
+
+  useEffect(() => {
+    const controller = new AbortController(); let mounted = true
+    void httpProvider.status(controller.signal).then((status) => {
+      if (mounted) setRealLlmAvailable(status.enabled)
+    }).catch(() => { if (mounted) setRealLlmAvailable(false) })
+    return () => { mounted = false; controller.abort() }
+  }, [httpProvider])
+
+  useEffect(() => {
+    if (adapterMode === 'real' && !realLlmAvailable) setAdapterMode('rules')
+    if (adapterMode === 'mock' && !import.meta.env.DEV) setAdapterMode('rules')
+  }, [adapterMode, realLlmAvailable])
 
   useEffect(() => {
     const question = result?.question
-    if (!question || questionMode !== 'mockRewrite' || !import.meta.env.DEV) {
+    if (!question || questionMode !== 'rewrite' || !rewriteAdapter) {
       setDisplayQuestion(null)
       return
     }
+    const operationKey = `${result.session.sessionId}:${question.id}`
+    const cachedQuestion = rewriteQuestionCacheRef.current.get(operationKey)
+    if (cachedQuestion) { setDisplayQuestion(cachedQuestion); return }
+    rewriteQuestionCacheRef.current.set(operationKey, question.question)
     const controller = new AbortController()
     setDisplayQuestion(question.question)
     void rewriteAdapter.rewrite({
@@ -54,6 +78,13 @@ export default function App() {
       locale: 'zh-CN',
     }, controller.signal).then((rewrite) => {
       if (controller.signal.aborted) return
+      if (adapterMode === 'real' && rewrite.trace.outcome === 'fallback') {
+        setLlmServiceNotice('自然语言辅助暂时不可用，已切换为标准问题模式。')
+        setAdapterMode('rules')
+        setQuestionMode('canonical')
+        return
+      }
+      rewriteQuestionCacheRef.current.set(operationKey, rewrite.question)
       setDisplayQuestion(rewrite.question)
       setResult((current) => {
         if (!current || current.session.currentSlotId !== rewrite.slotId) return current
@@ -70,6 +101,9 @@ export default function App() {
       pendingExtractionRef.current?.abort(new Error('provider_aborted'))
       pendingExtractionRef.current = null
       sessionGenerationRef.current += 1
+      extractionOperationKeysRef.current.clear()
+      rewriteQuestionCacheRef.current.clear()
+      setLlmServiceNotice(null)
       setResult(startSession({
         age: Number(age),
         initialText,
@@ -84,8 +118,11 @@ export default function App() {
     pendingExtractionRef.current?.abort(new Error('provider_aborted'))
     pendingExtractionRef.current = null
     sessionGenerationRef.current += 1
-    setMockBusy(false)
+    extractionOperationKeysRef.current.clear()
+    rewriteQuestionCacheRef.current.clear()
+    setLlmBusy(false)
     setInitialText('')
+    setLlmServiceNotice(null)
     setResult(null)
   }
 
@@ -107,9 +144,12 @@ export default function App() {
     }
   }
 
-  const answerWithMock = async (text: string) => {
-    if (!result || mockBusy || !mockNluEnabled) return
-    setMockBusy(true)
+  const answerWithLlm = async (text: string) => {
+    if (!result || llmBusy || !extractionAdapter) return
+    const operationKey = `${result.session.sessionId}:${result.session.turnCount}:${result.session.currentSlotId ?? 'none'}`
+    if (extractionOperationKeysRef.current.has(operationKey)) return
+    extractionOperationKeysRef.current.add(operationKey)
+    setLlmBusy(true)
     pendingExtractionRef.current?.abort(new Error('provider_aborted'))
     const controller = new AbortController()
     pendingExtractionRef.current = controller
@@ -118,6 +158,11 @@ export default function App() {
     try {
       const next = await answerFreeText(result.session, text, extractionAdapter, controller.signal)
       if (controller.signal.aborted || generation !== sessionGenerationRef.current) return
+      if (adapterMode === 'real' && next.extractionNotice) {
+        setLlmServiceNotice(next.extractionNotice)
+        setAdapterMode('rules')
+        setQuestionMode('canonical')
+      }
       setResult((current) => current?.session.sessionId === sessionId ? next : current)
     } catch {
       if (!controller.signal.aborted && generation === sessionGenerationRef.current) {
@@ -128,7 +173,7 @@ export default function App() {
     } finally {
       if (pendingExtractionRef.current === controller) {
         pendingExtractionRef.current = null
-        setMockBusy(false)
+        setLlmBusy(false)
       }
     }
   }
@@ -147,9 +192,10 @@ export default function App() {
           onAgeChange={setAge}
           onTextChange={setInitialText}
           onStart={begin}
-          mockNluEnabled={mockNluEnabled}
+          adapterMode={adapterMode}
+          realLlmAvailable={realLlmAvailable}
           questionMode={questionMode}
-          onMockNluChange={setMockNluEnabled}
+          onAdapterModeChange={(mode) => { setLlmServiceNotice(null); setAdapterMode(mode === 'mock' && !import.meta.env.DEV ? 'rules' : mode) }}
           onQuestionModeChange={setQuestionMode}
         />
       )}
@@ -162,11 +208,11 @@ export default function App() {
           onSkip={skip}
           validationError={result.validationError}
           displayQuestion={displayQuestion ?? undefined}
-          mockNluEnabled={mockNluEnabled && import.meta.env.DEV}
-          mockBusy={mockBusy}
-          extractionNotice={result.extractionNotice}
+          llmMode={adapterMode === 'rules' ? null : adapterMode}
+          llmBusy={llmBusy}
+          extractionNotice={result.extractionNotice ?? llmServiceNotice}
           clarificationQuestion={result.clarificationQuestion}
-          onFreeText={answerWithMock}
+          onFreeText={answerWithLlm}
         />
       )}
 

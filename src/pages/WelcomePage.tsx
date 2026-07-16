@@ -6,10 +6,11 @@ interface WelcomePageProps {
   onAgeChange: (value: string) => void
   onTextChange: (value: string) => void
   onStart: (quickComplaint?: ComplaintId) => void
-  mockNluEnabled: boolean
-  questionMode: 'canonical' | 'mockRewrite'
-  onMockNluChange: (enabled: boolean) => void
-  onQuestionModeChange: (mode: 'canonical' | 'mockRewrite') => void
+  adapterMode: 'rules' | 'mock' | 'real'
+  realLlmAvailable: boolean
+  questionMode: 'canonical' | 'rewrite'
+  onAdapterModeChange: (mode: 'rules' | 'mock' | 'real') => void
+  onQuestionModeChange: (mode: 'canonical' | 'rewrite') => void
 }
 
 export function WelcomePage({
@@ -18,9 +19,10 @@ export function WelcomePage({
   onAgeChange,
   onTextChange,
   onStart,
-  mockNluEnabled,
+  adapterMode,
+  realLlmAvailable,
   questionMode,
-  onMockNluChange,
+  onAdapterModeChange,
   onQuestionModeChange,
 }: WelcomePageProps) {
   const canStart = Number(age) > 0
@@ -69,16 +71,22 @@ export function WelcomePage({
           按描述开始整理
         </button>
 
-        {import.meta.env.DEV && (
-          <fieldset className="dev-controls">
-            <legend>开发模式适配器</legend>
-            <label className="toggle-row">
+        <fieldset className="dev-controls">
+            <legend>自然语言辅助模式</legend>
+            <label>
               <input
-                type="checkbox"
-                checked={mockNluEnabled}
-                onChange={(event) => onMockNluChange(event.target.checked)}
+                type="radio" name="adapter-mode" checked={adapterMode === 'rules'}
+                onChange={() => onAdapterModeChange('rules')}
               />
-              启用Mock自然语言理解
+              纯规则
+            </label>
+            {import.meta.env.DEV && <label>
+              <input type="radio" name="adapter-mode" checked={adapterMode === 'mock'} onChange={() => onAdapterModeChange('mock')} />
+              Mock LLM
+            </label>}
+            <label>
+              <input type="radio" name="adapter-mode" checked={adapterMode === 'real'} disabled={!realLlmAvailable} onChange={() => onAdapterModeChange('real')} />
+              Real LLM
             </label>
             <div className="question-mode" role="radiogroup" aria-label="问题表达方式">
               <label>
@@ -94,15 +102,15 @@ export function WelcomePage({
                 <input
                   type="radio"
                   name="question-mode"
-                  checked={questionMode === 'mockRewrite'}
-                  onChange={() => onQuestionModeChange('mockRewrite')}
+                  checked={questionMode === 'rewrite'}
+                  disabled={adapterMode === 'rules'}
+                  onChange={() => onQuestionModeChange('rewrite')}
                 />
                 使用模型改写问题
               </label>
             </div>
-            <small>当前只使用固定映射Mock，不连接真实模型API。</small>
+            <small>{realLlmAvailable ? '真实模式由服务端安全代理提供，模型不控制风险和流程。' : '真实模型未启用或服务端不可用；继续使用规则或开发Mock。'}</small>
           </fieldset>
-        )}
       </section>
     </main>
   )

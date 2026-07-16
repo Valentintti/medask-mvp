@@ -9,8 +9,8 @@ interface IntakePageProps {
   onSkip: () => void
   validationError?: string | null
   displayQuestion?: string
-  mockNluEnabled?: boolean
-  mockBusy?: boolean
+  llmMode?: 'mock' | 'real' | null
+  llmBusy?: boolean
   extractionNotice?: string | null
   clarificationQuestion?: string | null
   onFreeText?: (text: string) => Promise<void>
@@ -23,8 +23,8 @@ export function IntakePage({
   onSkip,
   validationError,
   displayQuestion,
-  mockNluEnabled,
-  mockBusy = false,
+  llmMode,
+  llmBusy = false,
   extractionNotice,
   clarificationQuestion,
   onFreeText,
@@ -60,14 +60,16 @@ export function IntakePage({
         validationError={validationError}
         displayQuestion={displayQuestion}
       />
-      {mockNluEnabled && onFreeText && (
+      {llmMode && onFreeText && (
         <FreeTextAnswer
-          busy={mockBusy}
+          busy={llmBusy}
           notice={extractionNotice}
           clarification={clarificationQuestion}
           onSubmit={onFreeText}
+          mode={llmMode}
         />
       )}
+      {!llmMode && extractionNotice && <p className="extraction-notice" role="status">{extractionNotice}</p>}
     </main>
   )
 }

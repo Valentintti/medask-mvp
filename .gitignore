@@ -1,9 +1,13 @@
 node_modules/
 dist/
+dist-server/
 coverage/
 .vite/
 *.local
 *.log
+.env
+.env.*
+!.env.example
 .DS_Store
 .idea/
 .vscode/

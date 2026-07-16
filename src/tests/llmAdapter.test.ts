@@ -203,7 +203,7 @@ describe('风险顺序、冲突与失败回退', () => {
     const provider = new MockLlmProvider({ throwInputs: ['故障输入'] })
     const result = await answerFreeText(base.session, '故障输入', new SlotExtractionAdapter(provider))
     expect(result.session.status).toBe('collecting')
-    expect(result.extractionNotice).toContain('回退到标准问题')
+    expect(result.extractionNotice).toBe('自然语言辅助暂时不可用，已切换为标准问题模式。')
   })
 
   it('Provider超时自动回退', async () => {

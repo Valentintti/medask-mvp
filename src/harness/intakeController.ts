@@ -315,7 +315,7 @@ export function processExtractionCandidates(
       question,
       summary: null,
       message: question?.question ?? '请使用标准选项继续。',
-      extractionNotice: '自然语言整理暂不可用，已回退到标准问题。',
+      extractionNotice: '自然语言辅助暂时不可用，已切换为标准问题模式。',
       clarificationQuestion: null,
       acceptedSlotIds: [],
       conflicts: [],
