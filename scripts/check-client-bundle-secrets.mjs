@@ -15,6 +15,7 @@ collect(root)
 const configuredKey = process.env.LLM_API_KEY?.trim()
 const configuredBaseUrl = process.env.LLM_BASE_URL?.trim()
 const forbidden = [
+  'LLM_API_KEY',
   'VITE_LLM_API_KEY',
   'TOP_SECRET_SERVER_KEY',
   'Authorization: Bearer',
@@ -23,6 +24,7 @@ const forbidden = [
   'https://127.0.0.1',
   'http://localhost',
   'https://localhost',
+  'api.deepseek.com',
   ...(configuredKey ? [configuredKey] : []),
   ...(configuredBaseUrl ? [configuredBaseUrl] : []),
 ]

@@ -13,6 +13,7 @@ interface WelcomePageProps {
   onAdapterModeChange: (mode: 'rules' | 'mock' | 'real') => void
   onQuestionModeChange: (mode: 'canonical' | 'rewrite') => void
   onDemoSelect: (demo: DemoCase) => void
+  staticDemo?: boolean
 }
 
 export function WelcomePage({
@@ -27,6 +28,7 @@ export function WelcomePage({
   onAdapterModeChange,
   onQuestionModeChange,
   onDemoSelect,
+  staticDemo = false,
 }: WelcomePageProps) {
   const canStart = Number(age) > 0
 
@@ -79,7 +81,7 @@ export function WelcomePage({
           开始整理
         </button>
 
-        {import.meta.env.DEV && <section className="demo-cases" aria-label="演示案例">
+        {(import.meta.env.DEV || staticDemo) && <section className="demo-cases" aria-label="演示案例">
           <div><strong>演示案例</strong><small>仅填充合成内容，不会自动提交</small></div>
           <div className="demo-case-buttons">
             {demoCases.map((demo) => (
@@ -90,7 +92,7 @@ export function WelcomePage({
           </div>
         </section>}
 
-        {import.meta.env.DEV && <fieldset className="dev-controls">
+        {import.meta.env.DEV && !staticDemo && <fieldset className="dev-controls">
             <legend>自然语言辅助模式</legend>
             <label>
               <input

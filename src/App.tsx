@@ -25,8 +25,9 @@ import { WelcomePage } from './pages/WelcomePage'
 import type { AnswerValue, ComplaintId, ControllerResult } from './types/intake'
 
 const LLM_FALLBACK_NOTICE = '自然语言辅助暂时不可用，你仍可继续按标准问题完成信息整理。'
+const STATIC_DEMO_BUILD = import.meta.env.VITE_STATIC_DEMO === 'true'
 
-export default function App() {
+export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: boolean }) {
   const [age, setAge] = useState('30')
   const [initialText, setInitialText] = useState('')
   const [result, setResult] = useState<ControllerResult | null>(null)
@@ -43,11 +44,17 @@ export default function App() {
   const llmAvailableEventRecordedRef = useRef(false)
   const mockProvider = useMemo(() => new MockLlmProvider(), [])
   const httpProvider = useMemo(() => new HttpLlmProvider(), [])
-  const activeProvider = adapterMode === 'mock' ? mockProvider : adapterMode === 'real' ? httpProvider : null
+  const activeProvider = staticDemo ? null : adapterMode === 'mock' ? mockProvider : adapterMode === 'real' ? httpProvider : null
   const extractionAdapter = useMemo(() => activeProvider ? new SlotExtractionAdapter(activeProvider, { timeoutMs: 8500 }) : null, [activeProvider])
   const rewriteAdapter = useMemo(() => activeProvider ? new QuestionRewriteAdapter(activeProvider, 8500) : null, [activeProvider])
 
   useEffect(() => {
+    if (staticDemo) {
+      setAdapterMode('rules')
+      setRealLlmAvailable(false)
+      setQuestionMode('canonical')
+      return
+    }
     const controller = new AbortController(); let mounted = true
     void httpProvider.status(controller.signal).then((status) => {
       if (!mounted) return
@@ -60,12 +67,12 @@ export default function App() {
       if (available && !import.meta.env.DEV) setAdapterMode('real')
     }).catch(() => { if (mounted) setRealLlmAvailable(false) })
     return () => { mounted = false; controller.abort() }
-  }, [httpProvider])
+  }, [httpProvider, staticDemo])
 
   useEffect(() => {
-    if (adapterMode === 'real' && !realLlmAvailable) setAdapterMode('rules')
-    if (adapterMode === 'mock' && !import.meta.env.DEV) setAdapterMode('rules')
-  }, [adapterMode, realLlmAvailable])
+    if (staticDemo || (adapterMode === 'real' && !realLlmAvailable)) setAdapterMode('rules')
+    if (adapterMode === 'mock' && (!import.meta.env.DEV || staticDemo)) setAdapterMode('rules')
+  }, [adapterMode, realLlmAvailable, staticDemo])
 
   useEffect(() => {
     const question = result?.question
@@ -228,6 +235,7 @@ export default function App() {
           onAdapterModeChange={(mode) => { setLlmServiceNotice(null); setAdapterMode(mode === 'mock' && !import.meta.env.DEV ? 'rules' : mode) }}
           onQuestionModeChange={setQuestionMode}
           onDemoSelect={(demo: DemoCase) => { setAge(String(demo.age)); setInitialText(demo.text) }}
+          staticDemo={staticDemo}
         />
       )}
 
@@ -266,7 +274,7 @@ export default function App() {
 
       {result?.session.status === 'error' && <SafeErrorPage onRestart={restart} />}
 
-      {import.meta.env.DEV && result && (
+      {import.meta.env.DEV && !staticDemo && result && (
         <TracePanel events={result.session.traceEvents} llmEvents={result.session.llmTraceEvents} />
       )}
       <footer>MedAsk · 就医前信息整理 Demo</footer>

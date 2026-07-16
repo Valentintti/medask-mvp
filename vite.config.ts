@@ -1,7 +1,10 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
+const staticDemo = process.env.VITE_STATIC_DEMO === 'true'
+
 export default defineConfig({
+  base: staticDemo ? '/medask-mvp/' : '/',
   plugins: [react()],
   server: {
     proxy: {
