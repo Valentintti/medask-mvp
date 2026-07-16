@@ -19,6 +19,7 @@ export function createIntakeSession(age: number, maxTurns = 7): IntakeSession {
     answers: {},
     askedSlotIds: [],
     skippedSlotIds: [],
+    notApplicableSlotIds: [],
     currentSlotId: null,
     turnCount: 0,
     maxTurns,

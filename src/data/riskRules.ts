@@ -8,25 +8,19 @@ export const riskRules: RiskRule[] = [
   {
     id: 'risk.chest_pain.explicit',
     label: '明确胸痛',
-    patterns: [/胸痛/u, /胸口(?:很|非常|剧烈)?痛/u, /胸口疼/u],
+    terms: ['胸痛', '胸口很痛', '胸口非常痛', '胸口剧烈痛', '胸口痛', '胸口疼'],
     escalationReason: '检测到明确胸痛表达',
   },
   {
     id: 'risk.breathing.severe',
     label: '明显呼吸困难',
-    patterns: [
-      /明显呼吸困难/u,
-      /喘不上气/u,
-      /呼吸(?:非常|很)?费力/u,
-      /呼吸困难/u,
-      /无法正常呼吸/u,
-    ],
+    terms: ['明显呼吸困难', '喘不上气', '呼吸非常费力', '呼吸很费力', '呼吸费力', '呼吸困难', '无法正常呼吸'],
     escalationReason: '检测到明显呼吸困难表达',
   },
   {
     id: 'risk.consciousness.altered',
     label: '意识异常或昏厥',
-    patterns: [/意识不清/u, /昏厥/u, /晕厥/u, /突然晕倒/u],
+    terms: ['意识不清', '昏厥', '晕厥', '突然晕倒'],
     escalationReason: '检测到意识异常或昏厥表达',
   },
 ]

@@ -1,17 +1,11 @@
-import type { AnswerValue, IntakeSummary } from '../types/intake'
-
-function displayValue(value: AnswerValue): string {
-  if (typeof value === 'boolean') return value ? '是' : '否'
-  if (Array.isArray(value)) return value.join('、')
-  return String(value)
-}
+import type { IntakeSummary, SummaryEntry } from '../types/intake'
 
 function SummarySection({
   title,
   items,
 }: {
   title: string
-  items: Array<{ label: string; value: AnswerValue }>
+  items: SummaryEntry[]
 }) {
   return (
     <section className="summary-section">
@@ -23,7 +17,7 @@ function SummarySection({
           {items.map((item) => (
             <div key={item.label}>
               <dt>{item.label}</dt>
-              <dd>{displayValue(item.value)}</dd>
+              <dd>{item.displayValue}</dd>
             </div>
           ))}
         </dl>
@@ -47,8 +41,13 @@ export function SummaryPage({ summary, onRestart }: { summary: IntakeSummary; on
       <SummarySection title="已采取措施" items={summary.measuresTaken} />
 
       <section className="missing-section">
-        <h2>未能获取的信息</h2>
-        <p>{summary.missingInformation.join('、') || '无'}</p>
+        <h2>尚未询问或未获取</h2>
+        <p>{summary.unansweredInformation.join('、') || '无'}</p>
+      </section>
+
+      <section className="missing-section">
+        <h2>用户暂不清楚</h2>
+        <p>{summary.skippedInformation.join('、') || '无'}</p>
       </section>
 
       <p className="summary-disclaimer">{summary.disclaimer}</p>

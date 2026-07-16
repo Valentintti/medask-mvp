@@ -75,7 +75,7 @@ describe('槽位选择', () => {
       .filter((id) => id !== 'sputumColor')
     const selection = selectNextSlot(session)
     expect(selection.slot).toBeNull()
-    expect(selection.skippedSlotIds).toContain('sputumColor')
+    expect(selection.notApplicableSlotIds).toContain('sputumColor')
   })
 
   it('有痰时追问痰液颜色', () => {
@@ -186,9 +186,11 @@ describe('摘要、Trace 与政策边界', () => {
     session.chiefComplaints = ['fever']
     session.answers.onset = '昨天'
     const summary = createSummary(session)
-    expect(summary.onset).toEqual([{ label: '起病时间', value: '昨天' }])
+    expect(summary.onset).toEqual([
+      { label: '起病时间', value: '昨天', displayValue: '昨天', source: 'user' },
+    ])
     expect(summary.currentSymptoms).toEqual([])
-    expect(summary.missingInformation).toContain('最高体温')
+    expect(summary.unansweredInformation).toContain('最高体温')
   })
 
   it('Trace 记录关键状态变化且不写控制台', () => {

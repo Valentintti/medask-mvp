@@ -6,6 +6,7 @@ export type SessionStatus =
   | 'completed'
   | 'escalated'
   | 'unsupported'
+  | 'error'
 
 export type PatientGroup = 'adult_18_65' | 'unsupported_age' | 'unknown'
 
@@ -22,6 +23,7 @@ export type TraceEventType =
   | 'question_selected'
   | 'escalated'
   | 'summary_generated'
+  | 'error'
 
 export interface TraceEvent {
   timestamp: string
@@ -47,6 +49,10 @@ export interface SlotDefinition {
   required: boolean
   priority: number
   options?: Array<{ label: string; value: string }>
+  min?: number
+  max?: number
+  unit?: string
+  validationMessage?: string
   showWhen?: ShowWhenCondition
   summarySection: 'onset' | 'current' | 'associated' | 'measures'
 }
@@ -62,7 +68,7 @@ export interface ComplaintRule {
 export interface RiskRule {
   id: string
   label: string
-  patterns: RegExp[]
+  terms: string[]
   escalationReason: string
 }
 
@@ -74,11 +80,13 @@ export interface IntakeSession {
   answers: Record<string, AnswerValue>
   askedSlotIds: string[]
   skippedSlotIds: string[]
+  notApplicableSlotIds: string[]
   currentSlotId: string | null
   turnCount: number
   maxTurns: number
   status: SessionStatus
   escalationReason: string | null
+  initialNarrative?: string
   traceEvents: TraceEvent[]
 }
 
@@ -97,17 +105,26 @@ export interface RiskResult {
 
 export interface SlotSelection {
   slot: SlotDefinition | null
-  skippedSlotIds: string[]
+  notApplicableSlotIds: string[]
+}
+
+export interface SummaryEntry {
+  label: string
+  value: AnswerValue
+  displayValue: string
+  source: 'user'
 }
 
 export interface IntakeSummary {
   patientType: string
   chiefComplaints: string[]
-  onset: Array<{ label: string; value: AnswerValue }>
-  currentSymptoms: Array<{ label: string; value: AnswerValue }>
-  associatedSymptoms: Array<{ label: string; value: AnswerValue }>
-  measuresTaken: Array<{ label: string; value: AnswerValue }>
-  missingInformation: string[]
+  onset: SummaryEntry[]
+  currentSymptoms: SummaryEntry[]
+  associatedSymptoms: SummaryEntry[]
+  measuresTaken: SummaryEntry[]
+  unansweredInformation: string[]
+  skippedInformation: string[]
+  notApplicableInformation: string[]
   escalated: boolean
   escalationReason: string | null
   disclaimer: string
@@ -118,4 +135,5 @@ export interface ControllerResult {
   question: SlotDefinition | null
   summary: IntakeSummary | null
   message: string
+  validationError?: string | null
 }

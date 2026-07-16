@@ -1,6 +1,6 @@
 import { detectComplaints, extractInitialAnswers } from '../engines/complaintEngine'
 import { checkStructuredRisk, checkTextRisk } from '../engines/riskEngine'
-import { selectNextSlot } from '../engines/slotEngine'
+import { selectNextSlot, validateSlotAnswer } from '../engines/slotEngine'
 import { createSummary } from '../engines/summaryEngine'
 import type {
   AnswerValue,
@@ -61,12 +61,12 @@ function selectQuestion(session: IntakeSession): ControllerResult {
   const selection = selectNextSlot(session)
   let next = session
 
-  for (const skippedId of selection.skippedSlotIds) {
+  for (const skippedId of selection.notApplicableSlotIds) {
     next = {
       ...next,
-      skippedSlotIds: next.skippedSlotIds.includes(skippedId)
-        ? next.skippedSlotIds
-        : [...next.skippedSlotIds, skippedId],
+      notApplicableSlotIds: next.notApplicableSlotIds.includes(skippedId)
+        ? next.notApplicableSlotIds
+        : [...next.notApplicableSlotIds, skippedId],
     }
     next = appendTrace(next, {
       eventType: 'slot_skipped',
@@ -147,6 +147,7 @@ export function startSession(input: StartSessionInput): ControllerResult {
   session = {
     ...session,
     chiefComplaints: complaints,
+    initialNarrative: initialText || undefined,
     answers: initialText ? extractInitialAnswers(initialText, complaints) : {},
   }
   session = appendTrace(session, {
@@ -174,6 +175,23 @@ export function answerCurrentSlot(
     return { session, question: null, summary: null, message: '当前没有可保存的普通问诊问题。' }
   }
 
+  const validation = validateSlotAnswer(slot, value)
+  if (!validation.valid) {
+    const traced = appendTrace(session, {
+      eventType: 'error',
+      input: { slotId: slot.id, errorType: 'validation' },
+      decision: '拒绝保存不符合槽位约束的回答',
+      ruleId: `slot.${slot.id}.validation`,
+    })
+    return {
+      session: traced,
+      question: slot,
+      summary: null,
+      message: validation.message ?? '请输入有效信息。',
+      validationError: validation.message,
+    }
+  }
+
   let next: IntakeSession = {
     ...session,
     answers: { ...session.answers, [slot.id]: value },
@@ -192,6 +210,28 @@ export function answerCurrentSlot(
   if (risk.matched) return escalate(next, risk)
   if (next.turnCount >= next.maxTurns) return complete(next, 'session.max_turns')
   return selectQuestion(next)
+}
+
+export function createSafeErrorResult(
+  session: IntakeSession,
+  ruleId = 'controller.unexpected_error',
+): ControllerResult {
+  const previousStatus = session.status
+  let next: IntakeSession = { ...session, status: 'error', currentSlotId: null }
+  next = appendTrace(next, {
+    eventType: 'error',
+    input: { errorType: 'rule_execution' },
+    decision: '规则执行异常，已切换到安全错误状态',
+    ruleId,
+    previousStatus,
+    nextStatus: 'error',
+  })
+  return {
+    session: next,
+    question: null,
+    summary: null,
+    message: '本次信息整理暂时无法继续，请返回首页后重试。',
+  }
 }
 
 export function skipCurrentSlot(session: IntakeSession, slot: SlotDefinition): ControllerResult {

@@ -1,5 +1,6 @@
 import { ESCALATION_SAFETY_MESSAGE, riskRules } from '../data/riskRules'
 import type { AnswerValue, RiskResult } from '../types/intake'
+import { hasAffirmedTerm } from './contextMatcher'
 
 const noRisk = (): RiskResult => ({
   matched: false,
@@ -13,7 +14,7 @@ export function checkTextRisk(text: string): RiskResult {
   if (!normalized) return noRisk()
 
   for (const rule of riskRules) {
-    if (rule.patterns.some((pattern) => pattern.test(normalized))) {
+    if (hasAffirmedTerm(normalized, rule.terms)) {
       return {
         matched: true,
         ruleId: rule.id,

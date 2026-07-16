@@ -81,6 +81,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .text-answer label { grid-column: 1 / -1; }
 .skip-button { margin-top: 18px; padding-left: 0; background: transparent; color: #6a817b; font-weight: 600; }
 .skip-button:hover { background: transparent; color: #173b35; }
+.validation-error { grid-column: 1 / -1; margin: 0; color: #a3382d; font-size: 14px; font-weight: 700; }
 
 .result-page { padding: 10vh 0; text-align: center; }
 .status-icon { width: 68px; height: 68px; margin: 0 auto 20px; display: grid; place-items: center; border-radius: 50%; background: #a73f32; color: white; font-size: 38px; font-weight: 900; }

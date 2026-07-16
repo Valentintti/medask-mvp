@@ -1,21 +1,34 @@
 import { useEffect, useState } from 'react'
+import { validateSlotAnswer } from '../engines/slotEngine'
 import type { AnswerValue, SlotDefinition } from '../types/intake'
 
 interface QuestionCardProps {
   slot: SlotDefinition
   onAnswer: (value: AnswerValue) => void
   onSkip: () => void
+  validationError?: string | null
 }
 
-export function QuestionCard({ slot, onAnswer, onSkip }: QuestionCardProps) {
+export function QuestionCard({ slot, onAnswer, onSkip, validationError }: QuestionCardProps) {
   const [value, setValue] = useState('')
+  const [localError, setLocalError] = useState<string | null>(null)
 
-  useEffect(() => setValue(''), [slot.id])
+  useEffect(() => {
+    setValue('')
+    setLocalError(null)
+  }, [slot.id])
 
   const submitText = () => {
     const trimmed = value.trim()
     if (!trimmed) return
-    onAnswer(slot.inputType === 'number' ? Number(trimmed) : trimmed)
+    const answer = slot.inputType === 'number' ? Number(trimmed) : trimmed
+    const validation = validateSlotAnswer(slot, answer)
+    if (!validation.valid) {
+      setLocalError(validation.message)
+      return
+    }
+    setLocalError(null)
+    onAnswer(answer)
   }
 
   return (
@@ -54,14 +67,26 @@ export function QuestionCard({ slot, onAnswer, onSkip }: QuestionCardProps) {
             id={`slot-${slot.id}`}
             type={slot.inputType === 'number' ? 'number' : 'text'}
             step={slot.inputType === 'number' ? '0.1' : undefined}
+            min={slot.min}
+            max={slot.max}
             value={value}
-            onChange={(event) => setValue(event.target.value)}
+            aria-invalid={Boolean(localError || validationError)}
+            aria-describedby={`slot-${slot.id}-error`}
+            onChange={(event) => {
+              setValue(event.target.value)
+              setLocalError(null)
+            }}
             onKeyDown={(event) => {
               if (event.key === 'Enter') submitText()
             }}
             placeholder={slot.inputType === 'number' ? '例如：38.5' : '请输入已知信息'}
           />
           <button onClick={submitText}>保存回答</button>
+          {(localError || validationError) && (
+            <p id={`slot-${slot.id}-error`} className="validation-error" role="alert">
+              {localError || validationError}
+            </p>
+          )}
         </div>
       )}
 

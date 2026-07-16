@@ -36,12 +36,13 @@ export function getSessionSlots(session: IntakeSession): SlotDefinition[] {
 }
 
 export function selectNextSlot(session: IntakeSession): SlotSelection {
-  if (session.turnCount >= session.maxTurns) return { slot: null, skippedSlotIds: [] }
+  if (session.turnCount >= session.maxTurns) return { slot: null, notApplicableSlotIds: [] }
 
-  const skippedSlotIds: string[] = []
+  const notApplicableSlotIds: string[] = []
   const unavailable = new Set([
     ...session.askedSlotIds,
     ...session.skippedSlotIds,
+    ...session.notApplicableSlotIds,
     ...Object.keys(session.answers),
   ])
 
@@ -52,14 +53,51 @@ export function selectNextSlot(session: IntakeSession): SlotSelection {
       const dependency = session.answers[slot.showWhen.slotId]
       if (dependency === undefined) continue
       if (!sameAnswer(dependency, slot.showWhen.equals)) {
-        skippedSlotIds.push(slot.id)
+        notApplicableSlotIds.push(slot.id)
         unavailable.add(slot.id)
         continue
       }
     }
 
-    return { slot, skippedSlotIds }
+    return { slot, notApplicableSlotIds }
   }
 
-  return { slot: null, skippedSlotIds }
+  return { slot: null, notApplicableSlotIds }
+}
+
+export interface SlotValidationResult {
+  valid: boolean
+  message: string | null
+}
+
+export function validateSlotAnswer(slot: SlotDefinition, value: AnswerValue): SlotValidationResult {
+  const defaultMessage = slot.validationMessage ?? '请输入有效信息。'
+
+  if (slot.inputType === 'number') {
+    if (
+      typeof value !== 'number' ||
+      !Number.isFinite(value) ||
+      (slot.min !== undefined && value < slot.min) ||
+      (slot.max !== undefined && value > slot.max)
+    ) {
+      return { valid: false, message: defaultMessage }
+    }
+  }
+
+  if (slot.inputType === 'boolean' && typeof value !== 'boolean') {
+    return { valid: false, message: defaultMessage }
+  }
+
+  if (
+    slot.inputType === 'singleSelect' &&
+    (typeof value !== 'string' || !slot.options?.some((option) => option.value === value))
+  ) {
+    return { valid: false, message: defaultMessage }
+  }
+
+  if (slot.inputType === 'text' && (typeof value !== 'string' || !value.trim())) {
+    return { valid: false, message: defaultMessage }
+  }
+
+  return { valid: true, message: null }
 }

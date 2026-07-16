@@ -1,22 +1,28 @@
 import { complaintRules } from '../data/complaintRules'
 import type { AnswerValue, ComplaintId } from '../types/intake'
+import { hasAffirmedTerm, type TermOccurrence } from './contextMatcher'
 
-const LOCAL_HEAT_PATTERNS = [/胸口发烧/u, /半身发烧/u, /手脚发热/u, /局部(?:发热|灼热)/u]
+function isLocalHeatExpression(text: string, occurrence: TermOccurrence): boolean {
+  const context = text.slice(
+    Math.max(0, occurrence.index - 4),
+    occurrence.index + occurrence.term.length + 3,
+  )
+  return /(?:胸口|半身|手脚|局部).{0,2}(?:发烧|发热)/u.test(context)
+}
 
 export function detectComplaints(text: string): ComplaintId[] {
   const normalized = text.trim()
   if (!normalized) return []
 
-  const withoutLocalHeat = LOCAL_HEAT_PATTERNS.reduce(
-    (current, pattern) => current.replace(pattern, ''),
-    normalized,
-  )
-
   const matches: ComplaintId[] = []
-  if (complaintRules.fever.terms.some((term) => withoutLocalHeat.includes(term))) {
+  if (
+    hasAffirmedTerm(normalized, complaintRules.fever.terms, (occurrence) =>
+      isLocalHeatExpression(normalized, occurrence),
+    )
+  ) {
     matches.push('fever')
   }
-  if (complaintRules.cough.terms.some((term) => normalized.includes(term))) {
+  if (hasAffirmedTerm(normalized, complaintRules.cough.terms)) {
     matches.push('cough')
   }
   return matches

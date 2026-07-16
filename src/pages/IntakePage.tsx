@@ -6,9 +6,10 @@ interface IntakePageProps {
   question: SlotDefinition
   onAnswer: (value: AnswerValue) => void
   onSkip: () => void
+  validationError?: string | null
 }
 
-export function IntakePage({ session, question, onAnswer, onSkip }: IntakePageProps) {
+export function IntakePage({ session, question, onAnswer, onSkip, validationError }: IntakePageProps) {
   return (
     <main className="intake-page">
       <header className="session-header">
@@ -33,7 +34,12 @@ export function IntakePage({ session, question, onAnswer, onSkip }: IntakePagePr
         <p>我只会按固定规则追问必要信息。遇到风险表达会停止普通流程。</p>
       </div>
 
-      <QuestionCard slot={question} onAnswer={onAnswer} onSkip={onSkip} />
+      <QuestionCard
+        slot={question}
+        onAnswer={onAnswer}
+        onSkip={onSkip}
+        validationError={validationError}
+      />
     </main>
   )
 }

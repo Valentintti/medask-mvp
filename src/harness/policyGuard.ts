@@ -22,3 +22,8 @@ export function assertPolicySafe(text: string): void {
     throw new Error(`输出越过产品边界：${violations.join(', ')}`)
   }
 }
+
+/** 仅审核系统生成的模板和叙述。用户原文必须在调用前与系统文本分离。 */
+export function assertSystemNarrativesSafe(narratives: string[]): void {
+  assertPolicySafe(narratives.join('\n'))
+}
