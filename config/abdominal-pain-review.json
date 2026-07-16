@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.0",
+  "samplingSeed": 20260717,
+  "dataProjectRelativePath": "../medical-intake-data",
+  "sourceFiles": {
+    "candidateQueue": "reports/im_manual_review.csv",
+    "goldV1": "reports/gold/im_manual_review_gold_v1.csv",
+    "goldV2": "reports/validation/gold/im_validation_gold_v2.csv",
+    "reviewTool": "tools/review_app.py"
+  },
+  "outputs": {
+    "auditReport": "reports/abdominal-pain-boundary-audit.md",
+    "targetedReview": "reports/abdominal-pain-targeted-review.csv",
+    "backupDirectory": "reports/abdominal-pain-review-backups"
+  },
+  "strata": {
+    "current_affirmed": 4,
+    "negated_historical_resolved": 4,
+    "adjacent_expression_without_pain": 4,
+    "mismatch_template_invalid": 3,
+    "unsupported_population": 2,
+    "possible_risk_expression": 3
+  },
+  "humanFields": [
+    "human_is_valid",
+    "human_current_symptom",
+    "human_final_complaint",
+    "human_intent",
+    "human_risk_expression",
+    "human_notes"
+  ]
+}
