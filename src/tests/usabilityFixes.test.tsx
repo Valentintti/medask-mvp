@@ -89,7 +89,7 @@ describe('确定性修改已填信息', () => {
     await user.click(screen.getByRole('button', { name: '暂不清楚，跳过' }))
     expect(screen.getByRole('heading', { name: '信息整理摘要' })).toBeInTheDocument()
     expect(screen.getByText('37℃')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '返回修改' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '修改已填信息' })).toBeInTheDocument()
   })
 })
 

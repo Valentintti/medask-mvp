@@ -278,7 +278,16 @@ export function answerCurrentSlot(
     answers: { ...session.answers, [slot.id]: value },
     currentSlotId: null,
     turnCount: session.turnCount + 1,
+    stepHistory: [
+      ...session.stepHistory,
+      {
+        slotId: slot.id,
+        previousValue: session.answers[slot.id],
+        wasSkipped: session.skippedSlotIds.includes(slot.id),
+      },
+    ],
   }
+  next = reconcileConditionalSlots(next)
   next = appendTrace(next, {
     eventType: 'slot_answered',
     input: { slotId: slot.id, valueType: typeof value },
@@ -327,6 +336,14 @@ export function skipCurrentSlot(session: IntakeSession, slot: SlotDefinition): C
       : [...session.skippedSlotIds, slot.id],
     currentSlotId: null,
     turnCount: session.turnCount + 1,
+    stepHistory: [
+      ...session.stepHistory,
+      {
+        slotId: slot.id,
+        previousValue: session.answers[slot.id],
+        wasSkipped: session.skippedSlotIds.includes(slot.id),
+      },
+    ],
   }
   next = appendTrace(next, {
     eventType: 'slot_skipped',
@@ -337,6 +354,45 @@ export function skipCurrentSlot(session: IntakeSession, slot: SlotDefinition): C
 
   if (next.turnCount >= next.maxTurns) return complete(next, 'session.max_turns')
   return selectQuestion(next)
+}
+
+export function returnToPreviousQuestion(session: IntakeSession): ControllerResult {
+  if (session.status !== 'collecting' || session.stepHistory.length === 0) {
+    return {
+      session,
+      question: currentQuestion(session),
+      summary: null,
+      message: '当前没有可以返回的上一步。',
+    }
+  }
+
+  const previous = session.stepHistory.at(-1)!
+  const skipped = new Set(session.skippedSlotIds)
+  skipped.delete(previous.slotId)
+
+  const abandonedCurrentSlotId = session.currentSlotId
+  let next = reconcileConditionalSlots({
+    ...session,
+    skippedSlotIds: [...skipped],
+    askedSlotIds: session.askedSlotIds.filter((id) =>
+      id !== abandonedCurrentSlotId || session.answers[id] !== undefined,
+    ),
+    currentSlotId: previous.slotId,
+    turnCount: Math.max(0, session.turnCount - 1),
+    stepHistory: session.stepHistory.slice(0, -1),
+  })
+  next = appendTrace(next, {
+    eventType: 'question_selected',
+    input: { slotId: previous.slotId, source: 'back_navigation' },
+    decision: '返回上一问题并恢复作答前状态',
+    ruleId: `slot.${previous.slotId}.back`,
+  })
+  return {
+    session: next,
+    question: getSessionSlot(next, previous.slotId),
+    summary: null,
+    message: '已返回上一步。',
+  }
 }
 
 function adapterAllowedSlots(session: IntakeSession): SlotDefinition[] {
@@ -434,7 +490,19 @@ export function processExtractionCandidates(
   )
 
   if (currentWasAccepted) {
-    next = { ...next, currentSlotId: null, turnCount: next.turnCount + 1 }
+    next = {
+      ...next,
+      currentSlotId: null,
+      turnCount: next.turnCount + 1,
+      stepHistory: [
+        ...next.stepHistory,
+        {
+          slotId: session.currentSlotId!,
+          previousValue: session.answers[session.currentSlotId!],
+          wasSkipped: session.skippedSlotIds.includes(session.currentSlotId!),
+        },
+      ],
+    }
     const result =
       next.turnCount >= next.maxTurns
         ? complete(next, 'session.max_turns')

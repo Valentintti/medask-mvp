@@ -396,7 +396,8 @@ for (const persona of PERSONAS) {
     state = await endState(page)
 
     if (persona.behavior === 'novice' && state === 'summary') {
-      await clickTracked(page.getByRole('button', { name: '重新开始' }), result)
+      page.once('dialog', (dialog) => dialog.accept())
+      await clickTracked(page.getByRole('button', { name: '返回首页' }), result)
       state = await endState(page)
     }
 
@@ -415,7 +416,7 @@ for (const persona of PERSONAS) {
       result.notes = assessment.note
     } else if (persona.behavior === 'novice' && state === 'welcome_after_restart') {
       result.summary_matches_user_input = true
-      result.notes = '完成摘要后重新开始成功；未保留上一会话内容'
+      result.notes = '完成摘要后确认返回首页成功；未保留上一会话内容'
     } else {
       result.notes = '未生成摘要'
     }

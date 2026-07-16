@@ -7,6 +7,7 @@ import {
   answerFreeText,
   createSafeErrorResult,
   editSessionAnswer,
+  returnToPreviousQuestion,
   skipCurrentSlot,
   startSession,
 } from './harness/intakeController'
@@ -29,6 +30,7 @@ import type { AnswerValue, ComplaintId, ControllerResult } from './types/intake'
 
 const LLM_FALLBACK_NOTICE = '自然语言辅助暂时不可用，你仍可继续按标准问题完成信息整理。'
 const STATIC_DEMO_BUILD = import.meta.env.VITE_STATIC_DEMO === 'true'
+const HOME_CONFIRM_MESSAGE = '返回首页将清空本次已填写内容，是否继续？'
 
 export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: boolean }) {
   const [age, setAge] = useState('30')
@@ -185,6 +187,19 @@ export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: b
     }
   }
 
+  const back = () => {
+    if (!result || result.session.status !== 'collecting') return
+    try {
+      setResult(returnToPreviousQuestion(result.session))
+    } catch {
+      setResult(createSafeErrorResult(result.session, 'controller.back_error'))
+    }
+  }
+
+  const confirmAndRestart = () => {
+    if (window.confirm(HOME_CONFIRM_MESSAGE)) restart()
+  }
+
   const editAnswer = (slotId: string, value: AnswerValue) => {
     if (!result) return
     try {
@@ -281,6 +296,8 @@ export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: b
           clarificationQuestion={result.clarificationQuestion}
           onFreeText={answerWithLlm}
           onEditAnswers={() => { setEditError(null); setEditingAnswers(true) }}
+          onBack={back}
+          onHome={confirmAndRestart}
         />
       )}
 
@@ -289,7 +306,7 @@ export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: b
       )}
 
       {result?.session.status === 'completed' && result.summary && (
-        <SummaryPage summary={result.summary} onRestart={restart} onEdit={() => { setEditError(null); setEditingAnswers(true) }} />
+        <SummaryPage summary={result.summary} onHome={confirmAndRestart} onEdit={() => { setEditError(null); setEditingAnswers(true) }} />
       )}
 
       {result?.session.status === 'unsupported' && (

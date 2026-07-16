@@ -58,7 +58,7 @@ describe('患者端基础流程', () => {
     await user.click(screen.getByRole('button', { name: '保存回答' }))
 
     await user.click(screen.getByRole('button', { name: '否' }))
-    await user.click(screen.getByRole('button', { name: '否' }))
+    await user.click(screen.getByRole('button', { name: '未采取任何措施' }))
     await user.click(screen.getByRole('button', { name: '否' }))
 
     expect(screen.getByRole('heading', { name: '信息整理摘要' })).toBeInTheDocument()

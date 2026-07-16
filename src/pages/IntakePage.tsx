@@ -15,6 +15,8 @@ interface IntakePageProps {
   clarificationQuestion?: string | null
   onFreeText?: (text: string) => Promise<void>
   onEditAnswers: () => void
+  onBack: () => void
+  onHome: () => void
 }
 
 export function IntakePage({
@@ -30,6 +32,8 @@ export function IntakePage({
   clarificationQuestion,
   onFreeText,
   onEditAnswers,
+  onBack,
+  onHome,
 }: IntakePageProps) {
   return (
     <main className="intake-page">
@@ -49,9 +53,17 @@ export function IntakePage({
           <span key={complaint}>{complaint === 'fever' ? '发热' : '咳嗽'}</span>
         ))}
       </div>
-      <button type="button" className="secondary-action edit-answers-button" onClick={onEditAnswers}>
-        查看/修改已填信息
-      </button>
+      <nav className="intake-navigation" aria-label="问诊导航">
+        <button type="button" className="secondary-action" disabled={session.stepHistory.length === 0} onClick={onBack}>
+          返回上一步
+        </button>
+        <button type="button" className="secondary-action" onClick={onEditAnswers}>
+          查看/修改已填信息
+        </button>
+        <button type="button" className="secondary-action" onClick={onHome}>
+          返回首页
+        </button>
+      </nav>
 
       <div className="chat-context">
         <div className="assistant-avatar">M</div>
@@ -64,6 +76,7 @@ export function IntakePage({
         onSkip={onSkip}
         validationError={validationError}
         displayQuestion={displayQuestion}
+        initialValue={session.answers[question.id]}
       />
       {llmMode && onFreeText && (
         <FreeTextAnswer

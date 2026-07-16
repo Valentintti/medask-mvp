@@ -26,7 +26,7 @@ function SummarySection({
   )
 }
 
-export function SummaryPage({ summary, onRestart, onEdit }: { summary: IntakeSummary; onRestart: () => void; onEdit?: () => void }) {
+export function SummaryPage({ summary, onHome, onEdit }: { summary: IntakeSummary; onHome: () => void; onEdit?: () => void }) {
   const copySummary = async () => {
     const lines = [
       `患者类型：${summary.patientType}`,
@@ -67,10 +67,10 @@ export function SummaryPage({ summary, onRestart, onEdit }: { summary: IntakeSum
 
       <p className="summary-disclaimer">{summary.disclaimer}</p>
       <div className="summary-actions">
-        {onEdit && <button className="secondary-action" onClick={onEdit}>返回修改</button>}
+        {onEdit && <button className="secondary-action" onClick={onEdit}>修改已填信息</button>}
         <button onClick={() => void copySummary()}>复制摘要</button>
         <button className="secondary-action" onClick={() => window.print()}>打印或保存为 PDF</button>
-        <button className="secondary-action" onClick={onRestart}>重新开始</button>
+        <button className="secondary-action" onClick={onHome}>返回首页</button>
       </div>
     </main>
   )

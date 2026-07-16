@@ -28,7 +28,8 @@ const sharedMedicationHistory: SlotDefinition = {
   question: '针对本次不适，是否已经采取过退热或其他处理？请只描述已做过什么。',
   complaints: ['fever', 'cough'],
   inputType: 'text',
-  required: false,
+  // 交接摘要必问，但仍允许用户选择“暂不清楚，跳过”。
+  required: true,
   priority: 90,
   summarySection: 'measures',
 }

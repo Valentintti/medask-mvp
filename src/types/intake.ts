@@ -95,6 +95,11 @@ export interface IntakeSession {
   feverCurrentStatus?: FeverCurrentStatus
   traceEvents: TraceEvent[]
   llmTraceEvents: LlmTraceEvent[]
+  stepHistory: Array<{
+    slotId: string
+    previousValue?: AnswerValue
+    wasSkipped: boolean
+  }>
 }
 
 export interface StartSessionInput {

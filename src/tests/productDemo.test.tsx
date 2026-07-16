@@ -66,7 +66,7 @@ describe('产品化页面与演示能力', () => {
     const user = userEvent.setup()
     const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
     const print = vi.spyOn(window, 'print').mockImplementation(() => undefined)
-    render(<SummaryPage summary={summary} onRestart={() => undefined} />)
+    render(<SummaryPage summary={summary} onHome={() => undefined} />)
     await user.click(screen.getByRole('button', { name: '复制摘要' }))
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining('起病时间：昨天')))
     await user.click(screen.getByRole('button', { name: '打印或保存为 PDF' }))

@@ -199,10 +199,11 @@ describe('槽位数值双层校验', () => {
     await user.type(screen.getByLabelText('起病时间'), '昨天')
     await user.click(screen.getByRole('button', { name: '保存回答' }))
     await user.click(screen.getByRole('button', { name: '持续' }))
+    await user.click(screen.getByRole('button', { name: '未采取任何措施' }))
     await user.type(screen.getByLabelText('当前体温'), '999')
     await user.click(screen.getByRole('button', { name: '保存回答' }))
     expect(screen.getByRole('alert')).toHaveTextContent('请输入30—45℃之间的有效体温。')
-    expect(screen.getByLabelText('问诊轮次')).toHaveTextContent('5/ 7 轮')
+    expect(screen.getByLabelText('问诊轮次')).toHaveTextContent('6/ 7 轮')
   })
 })
 
