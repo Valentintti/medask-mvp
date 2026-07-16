@@ -8,6 +8,7 @@ import { createLlmRouter } from '../../server/routes/llmRoutes'
 import { createAuditLogger } from '../../server/security/auditLogger'
 import { DailyTokenBudget, SlidingWindowRateLimiter } from '../../server/security/rateLimiter'
 import { sanitizeExtractRequest } from '../../server/security/requestSanitizer'
+import { classifyExtractionFailure } from '../../server/security/responseDiagnostics'
 import { MAX_MODEL_JSON_BYTES, validateExtractionProviderResponse } from '../../server/security/responseValidator'
 import type { RouteRequest, ServerConfig, ServerLlmProvider, ServerProviderResult } from '../../server/types'
 import { answerFreeText, startSession } from '../harness/intakeController'
@@ -18,6 +19,10 @@ import { LLM_SCHEMA_VERSION } from '../llm/types'
 
 const validExtract = { schemaVersion: LLM_SCHEMA_VERSION, candidates: [{ slotId: 'onset', value: '昨天', confidence: 0.99, evidence: '昨天', status: 'asserted' }], unresolvedSlotIds: [], needsClarification: false }
 const validRewrite = { schemaVersion: LLM_SCHEMA_VERSION, rewrittenQuestion: '这些不适是从什么时候开始的？', confidence: 0.99 }
+const completionResponse = (content: string) => new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content } }], usage: {} }), { status: 200 })
+const strictToolResponse = (argumentsValue: unknown) => new Response(JSON.stringify({
+  choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [{ type: 'function', function: { name: 'submit_slot_extraction', arguments: JSON.stringify(argumentsValue) } }] } }], usage: {},
+}), { status: 200 })
 const config = (overrides: Partial<ServerConfig> = {}): ServerConfig => ({
   enabled: true, configured: true, apiKey: 'TOP_SECRET_SERVER_KEY', baseUrl: 'https://example.invalid/v1', model: 'private-model',
   requestTimeoutMs: 50, maxRequestsPerMinute: 10, dailyTokenBudget: 50_000,
@@ -141,6 +146,63 @@ describe('Provider、严格响应和日志保护', () => {
     const init = fetchFn.mock.calls[0][1] as RequestInit
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer TOP_SECRET_SERVER_KEY')
     expect(String(init.body)).not.toContain('TOP_SECRET_SERVER_KEY')
+    expect(JSON.parse(String(init.body))).toEqual(expect.objectContaining({ response_format: { type: 'json_object' } }))
+  })
+  it('DeepSeek strict tool使用Beta端点、强制唯一函数并接受合法参数', async () => {
+    const fetchFn = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => strictToolResponse(validExtract))
+    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com/v1', model: 'm', fetchFn: fetchFn as typeof fetch })
+    const result = await provider.extractSlots(sanitizeExtractRequest(extractBody()))
+    expect(JSON.parse(result.rawJson)).toEqual(validExtract)
+    expect(String(fetchFn.mock.calls[0][0])).toBe('https://api.deepseek.com/beta/chat/completions')
+    const body = JSON.parse(String((fetchFn.mock.calls[0][1] as RequestInit).body))
+    expect(body.tool_choice).toEqual({ type: 'function', function: { name: 'submit_slot_extraction' } })
+    expect(body.tools).toHaveLength(1)
+    expect(body.tools[0].function).toEqual(expect.objectContaining({ name: 'submit_slot_extraction', strict: true }))
+    expect(body.tools[0].function.parameters).toEqual(expect.objectContaining({ additionalProperties: false, required: ['schemaVersion', 'candidates', 'unresolvedSlotIds', 'needsClarification'] }))
+    expect(JSON.stringify(body.tools[0].function.parameters)).not.toMatch(/minLength|maxLength|minItems|maxItems/u)
+    expect(provider.getStructuredOutputStats()).toEqual({ strictToolRequestCount: 1, jsonObjectFallbackCount: 0, strictFallbackReasonCounts: {} })
+  })
+  it('strict tool缺字段、多余字段和非法status仍被服务端Schema拒绝', async () => {
+    const invalidValues = [
+      { schemaVersion: '1.1', candidates: [], unresolvedSlotIds: [] },
+      { ...validExtract, diagnosis: '禁止字段' },
+      { ...validExtract, candidates: [{ ...validExtract.candidates[0], status: 'maybe' }] },
+    ]
+    for (const value of invalidValues) {
+      const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com', model: 'm', fetchFn: vi.fn(async () => strictToolResponse(value)) as typeof fetch })
+      const result = await provider.extractSlots(sanitizeExtractRequest(extractBody()))
+      expect(() => validateExtractionProviderResponse(result.rawJson, ['onset'], '我昨天开始发烧')).toThrow()
+    }
+  })
+  it('strict tool缺失时只回退一次json_object', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(completionResponse('{}'))
+      .mockResolvedValueOnce(completionResponse(JSON.stringify(validExtract)))
+    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com', model: 'm', fetchFn: fetchFn as typeof fetch })
+    const result = await provider.extractSlots(sanitizeExtractRequest(extractBody()))
+    expect(JSON.parse(result.rawJson)).toEqual(validExtract)
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    expect(provider.getStructuredOutputStats()).toEqual({ strictToolRequestCount: 1, jsonObjectFallbackCount: 1, strictFallbackReasonCounts: { tool_call_missing: 1 } })
+    expect(JSON.parse(String((fetchFn.mock.calls[1][1] as RequestInit).body))).toEqual(expect.objectContaining({ response_format: { type: 'json_object' }, temperature: 0 }))
+  })
+  it('Beta端点拒绝时最多回退一次json_object', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(new Response('{}', { status: 400 }))
+      .mockResolvedValueOnce(completionResponse(JSON.stringify(validExtract)))
+    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com', model: 'm', fetchFn: fetchFn as typeof fetch })
+    await expect(provider.extractSlots(sanitizeExtractRequest(extractBody()))).resolves.toEqual(expect.objectContaining({ structuredOutputStrategy: 'json_object_fallback' }))
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+  it('strict tool和json_object都失败时路由安全回退', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(new Response('{}', { status: 400 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 400 }))
+    const provider = new OpenAiCompatibleProvider({ apiKey: 'k', baseUrl: 'https://api.deepseek.com', model: 'm', fetchFn: fetchFn as typeof fetch })
+    const route = createLlmRouter({ config: config({ baseUrl: 'https://api.deepseek.com' }), provider, audit: quietAudit })
+    const result = await route(request())
+    expect(result.status).toBe(502)
+    expect(result.body).toEqual(expect.objectContaining({ error: expect.objectContaining({ code: 'provider_request_rejected' }) }))
+    expect(fetchFn).toHaveBeenCalledTimes(2)
   })
   it('审计日志不包含Key、原文、evidence或Authorization', async () => {
     const lines: string[] = []; const fake = new FakeProvider(); const route = createLlmRouter({ config: config(), provider: fake, audit: createAuditLogger((line) => lines.push(line)) })
@@ -150,6 +212,19 @@ describe('Provider、严格响应和日志保护', () => {
       'errorCategory', 'httpStatus', 'inputCharacterCount', 'latencyMs', 'modelAlias', 'operation', 'outcome',
       'outputCharacterCount', 'providerAlias', 'requestId', 'timestamp',
     ])
+  })
+  it.each([
+    ['', 'empty_content'],
+    ['{', 'truncated_output'],
+    ['not-json', 'invalid_json'],
+    [JSON.stringify({ schemaVersion: '1.1', candidates: [], unresolvedSlotIds: [] }), 'missing_field'],
+    [JSON.stringify({ ...validExtract, extra: true }), 'extra_field'],
+    [JSON.stringify({ ...validExtract, candidates: [{ ...validExtract.candidates[0], status: 'maybe' }] }), 'invalid_enum'],
+    [JSON.stringify({ ...validExtract, candidates: [{ ...validExtract.candidates[0], slotId: 'unknown' }] }), 'invalid_slot_id'],
+    [JSON.stringify({ ...validExtract, candidates: [{ ...validExtract.candidates[0], value: null }] }), 'invalid_value_type'],
+    [JSON.stringify({ ...validExtract, schemaVersion: '2.0' }), 'schema_version_mismatch'],
+  ])('Schema失败分类不包含原文或响应：%s', (raw, expectedCategory) => {
+    expect(classifyExtractionFailure(raw, new Error('rejected'), ['onset']).category).toBe(expectedCategory)
   })
   it('Markdown响应被拒绝', () => {
     expect(() => validateExtractionProviderResponse(`\`\`\`json\n${JSON.stringify(validExtract)}\n\`\`\``, ['onset'])).toThrow('response_not_strict_json')

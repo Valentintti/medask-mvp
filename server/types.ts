@@ -9,6 +9,7 @@ export interface ServerConfig {
 export interface ProviderUsage { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null }
 export interface ServerProviderResult {
   rawJson: string; inputCharacters: number; outputCharacters: number; usage: ProviderUsage; upstreamStatus: number
+  structuredOutputStrategy?: 'deepseek_strict_tool' | 'json_object_fallback' | 'question_rewrite_json_object'
 }
 export interface ServerLlmProvider {
   readonly providerAlias: string; readonly modelAlias: string
