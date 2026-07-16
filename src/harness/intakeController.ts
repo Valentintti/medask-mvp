@@ -1,4 +1,4 @@
-import { detectComplaints, detectFeverCurrentStatus, extractInitialAnswers } from '../engines/complaintEngine'
+import { detectComplaintCurrentStatus, detectComplaints, detectFeverCurrentStatus, extractInitialAnswers } from '../engines/complaintEngine'
 import { checkStructuredRisk, checkTextRisk } from '../engines/riskEngine'
 import { getSessionSlots, reconcileConditionalSlots, selectNextSlot, validateSlotAnswer } from '../engines/slotEngine'
 import { createSummary } from '../engines/summaryEngine'
@@ -13,6 +13,8 @@ import type {
 } from '../llm/types'
 import type {
   AnswerValue,
+  ComplaintCurrentStatus,
+  ComplaintId,
   ControllerResult,
   IntakeSession,
   RiskResult,
@@ -22,8 +24,10 @@ import type {
 import { createIntakeSession } from './sessionState'
 import { appendTrace } from './traceLogger'
 
-const UNSUPPORTED_AGE_MESSAGE = '当前演示仅支持18—65岁成人的发热和咳嗽信息整理。'
-const UNSUPPORTED_COMPLAINT_MESSAGE = '暂时无法用规则识别该主诉。当前演示仅支持发热和咳嗽。'
+const UNSUPPORTED_AGE_MESSAGE = '当前演示仅支持18—65岁成人的发热、咳嗽、头痛和头晕信息整理。'
+const UNSUPPORTED_COMPLAINT_MESSAGE = '暂时无法用规则识别该主诉。当前演示仅支持发热、咳嗽、头痛和头晕。'
+const UNSUPPORTED_POPULATION_PATTERN = /(?:怀孕|孕期|孕妇|产后|刚生产|刚生完)/u
+const UNSUPPORTED_POPULATION_MESSAGE = '当前演示暂不支持孕产妇或复杂随访场景，请改由人工服务继续。'
 
 function escalate(session: IntakeSession, risk: RiskResult): ControllerResult {
   const previousStatus = session.status
@@ -143,6 +147,18 @@ export function startSession(input: StartSessionInput): ControllerResult {
   }
 
   const initialText = input.initialText?.trim() ?? ''
+  if (UNSUPPORTED_POPULATION_PATTERN.test(initialText)) {
+    const previousStatus = session.status
+    session = { ...session, status: 'unsupported' }
+    session = appendTrace(session, {
+      eventType: 'complaint_matched',
+      decision: '文本显示为当前演示未纳入的人群',
+      ruleId: 'session.population_scope',
+      previousStatus,
+      nextStatus: 'unsupported',
+    })
+    return { session, question: null, summary: null, message: UNSUPPORTED_POPULATION_MESSAGE }
+  }
   const risk = checkTextRisk(initialText)
   session = traceRiskCheck(session, risk, 'initial_text')
   if (risk.matched) return escalate(session, risk)
@@ -154,7 +170,7 @@ export function startSession(input: StartSessionInput): ControllerResult {
     session = { ...session, status: 'unsupported' }
     session = appendTrace(session, {
       eventType: 'complaint_matched',
-      decision: '规则未识别出发热或咳嗽',
+      decision: '规则未识别出受支持主诉',
       ruleId: 'complaint.none',
       previousStatus,
       nextStatus: 'unsupported',
@@ -162,11 +178,17 @@ export function startSession(input: StartSessionInput): ControllerResult {
     return { session, question: null, summary: null, message: UNSUPPORTED_COMPLAINT_MESSAGE }
   }
 
+  const complaintCurrentStatuses: Partial<Record<ComplaintId, ComplaintCurrentStatus>> = {}
+  for (const complaint of complaints) {
+    complaintCurrentStatuses[complaint] = detectComplaintCurrentStatus(initialText, complaint)
+  }
+
   session = {
     ...session,
     chiefComplaints: complaints,
     initialNarrative: initialText || undefined,
     answers: initialText ? extractInitialAnswers(initialText, complaints) : {},
+    complaintCurrentStatuses,
     feverCurrentStatus: complaints.includes('fever')
       ? detectFeverCurrentStatus(initialText)
       : 'unknown',

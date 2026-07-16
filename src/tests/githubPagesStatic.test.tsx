@@ -48,6 +48,36 @@ describe('GitHub Pages 纯前端规则演示', () => {
     expect(screen.getByRole('heading', { name: '信息整理摘要' })).toBeInTheDocument()
   })
 
+  it('静态模式可完成头痛规则问诊', async () => {
+    const user = userEvent.setup()
+    render(<App staticDemo />)
+    await user.click(screen.getByRole('button', { name: '头痛快速入口' }))
+    await user.type(screen.getByLabelText('起病时间'), '今天')
+    await user.click(screen.getByRole('button', { name: '保存回答' }))
+    await user.click(screen.getByRole('button', { name: '逐渐出现' }))
+    await user.click(screen.getByRole('button', { name: '影响较小' }))
+    await user.click(screen.getByRole('button', { name: '太阳穴' }))
+    await user.click(screen.getByRole('button', { name: '持续' }))
+    await user.click(screen.getByRole('button', { name: '未采取任何措施' }))
+    await user.click(screen.getByRole('button', { name: '暂不清楚，跳过' }))
+    expect(screen.getByRole('heading', { name: '信息整理摘要' })).toBeInTheDocument()
+  })
+
+  it('静态模式可完成头晕规则问诊', async () => {
+    const user = userEvent.setup()
+    render(<App staticDemo />)
+    await user.click(screen.getByRole('button', { name: '头晕快速入口' }))
+    await user.type(screen.getByLabelText('起病时间'), '今天')
+    await user.click(screen.getByRole('button', { name: '保存回答' }))
+    await user.click(screen.getByRole('button', { name: '天旋地转' }))
+    await user.click(screen.getByRole('button', { name: '影响较小' }))
+    await user.click(screen.getByRole('button', { name: '持续' }))
+    await user.click(screen.getByRole('button', { name: '其他或不确定' }))
+    await user.click(screen.getByRole('button', { name: '未采取任何措施' }))
+    await user.click(screen.getByRole('button', { name: '可以独立行走' }))
+    expect(screen.getByRole('heading', { name: '信息整理摘要' })).toBeInTheDocument()
+  })
+
   it('静态模式的风险原文仍在本地立即中断', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const user = userEvent.setup()

@@ -26,6 +26,7 @@ export function createIntakeSession(age: number, maxTurns = 7): IntakeSession {
     status: 'idle',
     escalationReason: null,
     feverCurrentStatus: 'unknown',
+    complaintCurrentStatuses: {},
     traceEvents: [],
     llmTraceEvents: [],
     stepHistory: [],

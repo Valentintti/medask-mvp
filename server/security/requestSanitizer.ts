@@ -1,5 +1,6 @@
 import { SHARED_LLM_SCHEMA_VERSION } from '../../shared/llm/contracts'
 import type { QuestionRewriteRequest, SlotExtractionRequest } from '../../src/llm/types'
+import type { ComplaintId } from '../../src/types/intake'
 import { SERVER_COMPLAINT_IDS, SERVER_SUPPORTED_SLOT_IDS } from '../rules/serverSlotRules'
 import { RequestValidationError } from './errors'
 
@@ -29,10 +30,13 @@ function stringArray(value: unknown, max: number): string[] | null {
   const sanitized = value.map((item) => stripUnsafeCharacters(item))
   return sanitized.every(Boolean) ? [...new Set(sanitized)] : null
 }
-function complaints(value: unknown): ('fever' | 'cough')[] | null {
-  const items = stringArray(value, 2)
-  if (!items || items.length === 0 || !items.every((item) => SERVER_COMPLAINT_IDS.has(item as 'fever' | 'cough'))) return null
-  return items as ('fever' | 'cough')[]
+function isComplaintId(value: string): value is ComplaintId {
+  return SERVER_COMPLAINT_IDS.has(value as ComplaintId)
+}
+function complaints(value: unknown): ComplaintId[] | null {
+  const items = stringArray(value, 4)
+  if (!items || items.length === 0 || !items.every(isComplaintId)) return null
+  return items
 }
 export function sanitizeExtractRequest(bodyText: string): SlotExtractionRequest {
   const raw = parseBody(bodyText)

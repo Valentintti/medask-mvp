@@ -2,7 +2,7 @@ import { complaintDisplayNames } from '../data/complaintRules'
 import { formatAnswerValue, formatUserNarrative } from './answerFormatter'
 import { getSessionSlots } from './slotEngine'
 import { assertSystemNarrativesSafe, POLICY_DISCLAIMER } from '../harness/policyGuard'
-import type { IntakeSession, IntakeSummary, SummaryEntry } from '../types/intake'
+import type { ComplaintId, IntakeSession, IntakeSummary, SummaryEntry } from '../types/intake'
 
 function toEntries(
   session: IntakeSession,
@@ -44,21 +44,32 @@ export function createSummary(session: IntakeSession): IntakeSummary {
   }
 
   const currentSymptoms = toEntries(session, 'current')
-  if (session.feverCurrentStatus === 'resolved') {
-    currentSymptoms.unshift({
-      label: '本次发热状态',
+  const resolvedSymptoms: SummaryEntry[] = []
+  const currentStatuses = { ...session.complaintCurrentStatuses }
+  if (!currentStatuses.fever && session.feverCurrentStatus !== 'unknown') {
+    currentStatuses.fever = session.feverCurrentStatus
+  }
+  for (const complaint of session.chiefComplaints) {
+    if (currentStatuses[complaint] !== 'resolved') continue
+    const displayName = complaintDisplayNames[complaint]
+    resolvedSymptoms.push({
+      label: `本次${displayName}状态`,
       value: 'resolved',
-      displayValue: '本次发热目前已缓解',
+      displayValue: `本次${displayName}目前已缓解`,
       source: 'user',
     })
   }
   if (session.initialNarrative) {
-    currentSymptoms.unshift({
+    const narrativeEntry: SummaryEntry = {
       label: '用户首句描述',
       value: session.initialNarrative,
       displayValue: formatUserNarrative(session.initialNarrative),
       source: 'user',
-    })
+    }
+    const allResolved = session.chiefComplaints.length > 0 && session.chiefComplaints.every(
+      (complaint: ComplaintId) => currentStatuses[complaint] === 'resolved',
+    )
+    ;(allResolved ? resolvedSymptoms : currentSymptoms).unshift(narrativeEntry)
   }
 
   const summary: IntakeSummary = {
@@ -69,6 +80,7 @@ export function createSummary(session: IntakeSession): IntakeSummary {
     chiefComplaints: session.chiefComplaints.map((id) => complaintDisplayNames[id]),
     onset: toEntries(session, 'onset'),
     currentSymptoms,
+    resolvedSymptoms,
     associatedSymptoms: toEntries(session, 'associated'),
     measuresTaken: toEntries(session, 'measures'),
     unansweredInformation,

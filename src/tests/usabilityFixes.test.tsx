@@ -18,7 +18,7 @@ describe('近期已缓解的本次发热', () => {
   it('摘要明确本次已缓解且不声称当前仍发热', () => {
     const started = startSession({ age: 40, initialText: '昨天38.5度，现在已经退烧了' })
     const summary = createSummary({ ...started.session, status: 'completed' })
-    expect(summary.currentSymptoms.some((item) => item.displayValue === '本次发热目前已缓解')).toBe(true)
+    expect(summary.resolvedSymptoms.some((item) => item.displayValue === '本次发热目前已缓解')).toBe(true)
     expect(JSON.stringify(summary)).not.toContain('当前仍发热')
   })
 

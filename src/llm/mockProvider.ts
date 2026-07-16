@@ -49,6 +49,38 @@ const BUILT_IN_RESPONSES: Record<string, unknown> = {
   '模型返回幻觉证据': response([
     { slotId: 'onset', value: '昨天', confidence: 0.99, evidence: '昨天开始', status: 'asserted' },
   ]),
+  '昨天开始头痛': response([
+    { slotId: 'onset', value: '昨天', confidence: 0.98, evidence: '昨天开始', status: 'asserted' },
+  ]),
+  '突然开始剧烈头痛': response([
+    { slotId: 'headacheOnsetSpeed', value: 'sudden', confidence: 0.99, evidence: '突然开始', status: 'asserted' },
+  ]),
+  '太阳穴一阵阵疼': response([
+    { slotId: 'headacheLocation', value: 'temple', confidence: 0.98, evidence: '太阳穴', status: 'asserted' },
+    { slotId: 'headachePattern', value: 'intermittent', confidence: 0.98, evidence: '一阵阵', status: 'asserted' },
+  ]),
+  '没有头痛': response([
+    { slotId: 'headacheSensation', value: '头痛', confidence: 0.99, evidence: '没有头痛', status: 'negated' },
+  ]),
+  '头痛已经好了': response([
+    { slotId: 'headachePattern', value: 'uncertain', confidence: 0.99, evidence: '头痛已经好了', status: 'resolved' },
+  ]),
+  '今天开始天旋地转': response([
+    { slotId: 'onset', value: '今天', confidence: 0.98, evidence: '今天开始', status: 'asserted' },
+    { slotId: 'dizzinessExperience', value: 'spinning', confidence: 0.99, evidence: '天旋地转', status: 'asserted' },
+  ]),
+  '站起来会发晕': response([
+    { slotId: 'dizzinessTrigger', value: 'standing_up', confidence: 0.98, evidence: '站起来', status: 'asserted' },
+  ]),
+  '走路有点不稳': response([
+    { slotId: 'balanceImpact', value: 'unsteady', confidence: 0.96, evidence: '走路有点不稳', status: 'asserted' },
+  ]),
+  '没有头晕': response([
+    { slotId: 'dizzinessExperience', value: 'uncertain', confidence: 0.99, evidence: '没有头晕', status: 'negated' },
+  ]),
+  '头晕已经缓解': response([
+    { slotId: 'dizzinessPattern', value: 'uncertain', confidence: 0.99, evidence: '头晕已经缓解', status: 'resolved' },
+  ]),
   '__INVALID_JSON__': '{invalid json',
   '__EXTRA_FIELD__': {
     schemaVersion: LLM_SCHEMA_VERSION, candidates: [], unresolvedSlotIds: [], needsClarification: false, diagnosis: '禁止',
@@ -66,6 +98,19 @@ const REWRITES: Record<string, string> = {
   feverAssociated: '咳嗽时有没有同时发热？',
   breathingDifficulty: '现在有没有明显呼吸困难？',
   chestPain: '现在有没有明确胸痛？',
+  headacheOnsetSpeed: '头痛是突然出现、逐渐出现，还是暂时不确定？',
+  headacheFunctionalImpact: '头痛对日常活动有多大影响？',
+  headacheLocation: '头痛主要位于头部哪里？',
+  headachePattern: '头痛是持续、间歇、反复，还是不确定？',
+  headacheSensation: '请用自己的话描述头痛的感觉。',
+  headacheEpisodeDuration: '每次头痛大约持续多久？',
+  dizzinessExperience: '头晕主要是什么样的感觉？',
+  dizzinessFunctionalImpact: '头晕对日常活动有多大影响？',
+  dizzinessPattern: '头晕是持续、间歇、反复，还是不确定？',
+  dizzinessTrigger: '头晕通常在什么情况下出现？',
+  balanceImpact: '头晕时行走和平衡受到什么影响？',
+  dizzinessEpisodeDuration: '每次头晕大约持续多久？',
+  medicationHistory: '针对本次不适，你已经采取过哪些处理？',
 }
 
 export interface MockProviderOptions {

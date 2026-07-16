@@ -1,5 +1,6 @@
 import { QuestionCard } from '../components/QuestionCard'
 import { FreeTextAnswer } from '../components/FreeTextAnswer'
+import { complaintDisplayNames } from '../data/complaintRules'
 import type { AnswerValue, IntakeSession, SlotDefinition } from '../types/intake'
 
 interface IntakePageProps {
@@ -50,7 +51,7 @@ export function IntakePage({
 
       <div className="complaint-pills">
         {session.chiefComplaints.map((complaint) => (
-          <span key={complaint}>{complaint === 'fever' ? '发热' : '咳嗽'}</span>
+          <span key={complaint}>{complaintDisplayNames[complaint]}</span>
         ))}
       </div>
       <nav className="intake-navigation" aria-label="问诊导航">

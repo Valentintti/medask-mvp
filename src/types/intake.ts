@@ -1,6 +1,6 @@
 import type { LlmTraceEvent } from '../llm/types'
 
-export type ComplaintId = 'fever' | 'cough'
+export type ComplaintId = 'fever' | 'cough' | 'headache' | 'dizziness'
 
 export type SessionStatus =
   | 'idle'
@@ -13,6 +13,7 @@ export type SessionStatus =
 export type PatientGroup = 'adult_18_65' | 'unsupported_age' | 'unknown'
 
 export type FeverCurrentStatus = 'current' | 'resolved' | 'unknown'
+export type ComplaintCurrentStatus = FeverCurrentStatus
 
 export type AnswerValue = string | number | boolean | string[]
 
@@ -73,7 +74,9 @@ export interface ComplaintRule {
 export interface RiskRule {
   id: string
   label: string
-  terms: string[]
+  terms?: string[]
+  allTermGroups?: string[][]
+  maxSpan?: number
   escalationReason: string
 }
 
@@ -93,6 +96,7 @@ export interface IntakeSession {
   escalationReason: string | null
   initialNarrative?: string
   feverCurrentStatus?: FeverCurrentStatus
+  complaintCurrentStatuses: Partial<Record<ComplaintId, ComplaintCurrentStatus>>
   traceEvents: TraceEvent[]
   llmTraceEvents: LlmTraceEvent[]
   stepHistory: Array<{
@@ -132,6 +136,7 @@ export interface IntakeSummary {
   chiefComplaints: string[]
   onset: SummaryEntry[]
   currentSymptoms: SummaryEntry[]
+  resolvedSymptoms: SummaryEntry[]
   associatedSymptoms: SummaryEntry[]
   measuresTaken: SummaryEntry[]
   unansweredInformation: string[]

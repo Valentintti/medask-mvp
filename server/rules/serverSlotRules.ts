@@ -4,7 +4,7 @@ import type { QuestionRewriteRequest, SlotExtractionRequest } from '../../src/ll
 import type { ComplaintId, SlotDefinition } from '../../src/types/intake'
 import { RequestValidationError } from '../security/errors'
 
-export const SERVER_COMPLAINT_IDS = new Set<ComplaintId>(['fever', 'cough'])
+export const SERVER_COMPLAINT_IDS = new Set<ComplaintId>(['fever', 'cough', 'headache', 'dizziness'])
 
 export function trustedSlotsForComplaints(complaints: readonly ComplaintId[]): Map<string, SlotDefinition> {
   const trusted = new Map<string, SlotDefinition>()

@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:usability": "playwright test tests/usability-simulation.spec.ts",
-    "eval:real": "tsx scripts/evaluate-real-provider.ts"
+    "eval:real": "tsx scripts/evaluate-real-provider.ts",
+    "eval:v2": "tsx scripts/evaluate-v2-complaints.ts"
   },
   "dependencies": {
     "react": "^19.1.1",

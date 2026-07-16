@@ -27,7 +27,7 @@ describe('患者端基础流程', () => {
     await user.type(screen.getByLabelText('用一句话描述当前不适（可选）'), '我想咨询一件别的事情')
     await user.click(screen.getByRole('button', { name: '开始整理' }))
     expect(screen.getByRole('heading', { name: '当前规则无法继续' })).toBeInTheDocument()
-    expect(screen.getByText(/当前演示仅支持发热和咳嗽/u)).toBeInTheDocument()
+    expect(screen.getByText(/当前演示仅支持发热、咳嗽、头痛和头晕/u)).toBeInTheDocument()
   })
 
   it('结构化确认胸痛后切换到升级提示页', async () => {
