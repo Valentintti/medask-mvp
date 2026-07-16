@@ -1,7 +1,15 @@
 import { detectComplaints, extractInitialAnswers } from '../engines/complaintEngine'
 import { checkStructuredRisk, checkTextRisk } from '../engines/riskEngine'
-import { selectNextSlot, validateSlotAnswer } from '../engines/slotEngine'
+import { getSessionSlots, selectNextSlot, validateSlotAnswer } from '../engines/slotEngine'
 import { createSummary } from '../engines/summaryEngine'
+import { formatAnswerValue } from '../engines/answerFormatter'
+import { appendLlmTrace } from '../llm/llmTrace'
+import { SlotExtractionAdapter } from '../llm/slotExtractionAdapter'
+import type {
+  ExtractionAdapterResult,
+  FreeTextControllerResult,
+  SlotConflict,
+} from '../llm/types'
 import type {
   AnswerValue,
   ControllerResult,
@@ -105,6 +113,15 @@ function traceRiskCheck(session: IntakeSession, risk: RiskResult, source: string
     decision: risk.matched ? risk.reason ?? '命中风险规则' : '未命中风险规则',
     ruleId: risk.ruleId,
   })
+}
+
+function currentQuestion(session: IntakeSession): SlotDefinition | null {
+  if (!session.currentSlotId) return null
+  return getSessionSlot(session, session.currentSlotId)
+}
+
+function getSessionSlot(session: IntakeSession, slotId: string): SlotDefinition | null {
+  return getSessionSlots(session).find((slot) => slot.id === slotId) ?? null
 }
 
 export function startSession(input: StartSessionInput): ControllerResult {
@@ -256,4 +273,165 @@ export function skipCurrentSlot(session: IntakeSession, slot: SlotDefinition): C
 
   if (next.turnCount >= next.maxTurns) return complete(next, 'session.max_turns')
   return selectQuestion(next)
+}
+
+function adapterAllowedSlots(session: IntakeSession): SlotDefinition[] {
+  return getSessionSlots(session).filter((slot) => {
+    if (session.answers[slot.id] !== undefined) return true
+    if (session.skippedSlotIds.includes(slot.id) || session.notApplicableSlotIds.includes(slot.id)) {
+      return false
+    }
+    if (slot.showWhen) {
+      const dependency = session.answers[slot.showWhen.slotId]
+      if (dependency !== undefined && dependency !== slot.showWhen.equals) return false
+    }
+    return true
+  })
+}
+
+function conflictQuestion(conflict: SlotConflict, session: IntakeSession): string {
+  const slot = getSessionSlot(session, conflict.slotId)
+  if (!slot) return '你提供的信息与之前不一致，请确认哪一次描述更准确？'
+  const existing = formatAnswerValue(slot, conflict.existingValue)
+  const proposed = formatAnswerValue(slot, conflict.proposedValue)
+  if (slot.id === 'currentTemperature') {
+    return `你之前提供的是${existing}，现在提到${proposed}。请确认当前体温是多少？`
+  }
+  return `你之前提供的“${slot.label}”是${existing}，现在提到${proposed}。请确认哪一个更准确？`
+}
+
+export function processExtractionCandidates(
+  session: IntakeSession,
+  extraction: ExtractionAdapterResult,
+): FreeTextControllerResult {
+  let next = appendLlmTrace(session, extraction.trace)
+  const acceptedSlotIds = extraction.acceptedCandidates.map((candidate) => candidate.slotId)
+
+  if (extraction.fallbackToRules) {
+    const question = currentQuestion(next)
+    return {
+      session: next,
+      question,
+      summary: null,
+      message: question?.question ?? '请使用标准选项继续。',
+      extractionNotice: '自然语言整理暂不可用，已回退到标准问题。',
+      clarificationQuestion: null,
+      acceptedSlotIds: [],
+      conflicts: [],
+    }
+  }
+
+  if (extraction.conflicts.length > 0) {
+    const clarificationQuestion = conflictQuestion(extraction.conflicts[0], next)
+    return {
+      session: next,
+      question: currentQuestion(next),
+      summary: null,
+      message: clarificationQuestion,
+      extractionNotice: null,
+      clarificationQuestion,
+      acceptedSlotIds: [],
+      conflicts: extraction.conflicts,
+    }
+  }
+
+  for (const candidate of extraction.acceptedCandidates) {
+    const slot = getSessionSlot(next, candidate.slotId)
+    if (!slot || next.answers[candidate.slotId] !== undefined) continue
+    next = {
+      ...next,
+      answers: { ...next.answers, [candidate.slotId]: candidate.value },
+    }
+    next = appendTrace(next, {
+      eventType: 'slot_answered',
+      input: { slotId: candidate.slotId, source: 'validated_adapter' },
+      decision: 'Harness接受已通过Schema、槽位和风险校验的候选',
+      ruleId: `slot.${candidate.slotId}.adapter_acceptance`,
+    })
+  }
+
+  const formatted = extraction.acceptedCandidates
+    .map((candidate) => {
+      const slot = getSessionSlot(next, candidate.slotId)
+      return slot ? `${slot.label}：${formatAnswerValue(slot, candidate.value)}` : null
+    })
+    .filter((item): item is string => Boolean(item))
+  const extractionNotice = formatted.length > 0 ? `已从你的描述中整理出：${formatted.join('；')}` : null
+  const currentWasAccepted = Boolean(
+    session.currentSlotId && acceptedSlotIds.includes(session.currentSlotId),
+  )
+
+  if (currentWasAccepted) {
+    next = { ...next, currentSlotId: null, turnCount: next.turnCount + 1 }
+    const result =
+      next.turnCount >= next.maxTurns
+        ? complete(next, 'session.max_turns')
+        : selectQuestion(next)
+    return {
+      ...result,
+      extractionNotice,
+      clarificationQuestion: null,
+      acceptedSlotIds,
+      conflicts: [],
+    }
+  }
+
+  const question = currentQuestion(next)
+  const clarificationQuestion =
+    extraction.needsClarification && acceptedSlotIds.length === 0
+      ? question
+        ? `请再明确描述“${question.label}”：${question.question}`
+        : '请再明确描述一下当前情况。'
+      : null
+  return {
+    session: next,
+    question,
+    summary: null,
+    message: clarificationQuestion ?? extractionNotice ?? question?.question ?? '请继续。',
+    extractionNotice,
+    clarificationQuestion,
+    acceptedSlotIds,
+    conflicts: [],
+  }
+}
+
+export async function answerFreeText(
+  session: IntakeSession,
+  userText: string,
+  adapter: SlotExtractionAdapter,
+): Promise<FreeTextControllerResult> {
+  if (session.status !== 'collecting') {
+    return {
+      session,
+      question: null,
+      summary: null,
+      message: '当前会话不接受普通问诊回答。',
+      acceptedSlotIds: [],
+      conflicts: [],
+    }
+  }
+
+  const risk = checkTextRisk(userText)
+  const checked = traceRiskCheck(session, risk, 'free_text_before_adapter')
+  if (risk.matched) {
+    return { ...escalate(checked, risk), acceptedSlotIds: [], conflicts: [] }
+  }
+
+  const extraction = await adapter.extract({
+    supportedComplaints: checked.chiefComplaints,
+    allowedSlots: adapterAllowedSlots(checked),
+    currentQuestionSlotId: checked.currentSlotId,
+    userText,
+    existingAnswers: checked.answers,
+  })
+  return processExtractionCandidates(checked, extraction)
+}
+
+export async function startSessionWithAdapter(
+  input: StartSessionInput,
+  adapter: SlotExtractionAdapter | null,
+): Promise<FreeTextControllerResult | ControllerResult> {
+  const base = startSession(input)
+  if (!adapter || !input.initialText || base.session.status !== 'collecting') return base
+  return answerFreeText(base.session, input.initialText, adapter)
 }

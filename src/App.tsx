@@ -1,13 +1,18 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { SafetyBanner } from './components/SafetyBanner'
 import { TracePanel } from './components/TracePanel'
 import {
   answerCurrentSlot,
+  answerFreeText,
   createSafeErrorResult,
   skipCurrentSlot,
   startSession,
 } from './harness/intakeController'
 import { createIntakeSession } from './harness/sessionState'
+import { appendLlmTrace } from './llm/llmTrace'
+import { MockLlmProvider } from './llm/mockProvider'
+import { QuestionRewriteAdapter } from './llm/questionRewriteAdapter'
+import { SlotExtractionAdapter } from './llm/slotExtractionAdapter'
 import { EscalationPage } from './pages/EscalationPage'
 import { IntakePage } from './pages/IntakePage'
 import { SummaryPage } from './pages/SummaryPage'
@@ -19,6 +24,39 @@ export default function App() {
   const [age, setAge] = useState('30')
   const [initialText, setInitialText] = useState('')
   const [result, setResult] = useState<ControllerResult | null>(null)
+  const [mockNluEnabled, setMockNluEnabled] = useState(false)
+  const [questionMode, setQuestionMode] = useState<'canonical' | 'mockRewrite'>('canonical')
+  const [displayQuestion, setDisplayQuestion] = useState<string | null>(null)
+  const [mockBusy, setMockBusy] = useState(false)
+  const mockProvider = useMemo(() => new MockLlmProvider(), [])
+  const extractionAdapter = useMemo(() => new SlotExtractionAdapter(mockProvider), [mockProvider])
+  const rewriteAdapter = useMemo(() => new QuestionRewriteAdapter(mockProvider), [mockProvider])
+
+  useEffect(() => {
+    const question = result?.question
+    if (!question || questionMode !== 'mockRewrite' || !import.meta.env.DEV) {
+      setDisplayQuestion(null)
+      return
+    }
+    let cancelled = false
+    setDisplayQuestion(question.question)
+    void rewriteAdapter.rewrite({
+      slotId: question.id,
+      canonicalQuestion: question.question,
+      complaintContext: result.session.chiefComplaints,
+      locale: 'zh-CN',
+    }).then((rewrite) => {
+      if (cancelled) return
+      setDisplayQuestion(rewrite.question)
+      setResult((current) => {
+        if (!current || current.session.currentSlotId !== rewrite.slotId) return current
+        return { ...current, session: appendLlmTrace(current.session, rewrite.trace) }
+      })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [result?.session.currentSlotId, questionMode, rewriteAdapter])
 
   const begin = (quickComplaint?: ComplaintId) => {
     try {
@@ -55,6 +93,18 @@ export default function App() {
     }
   }
 
+  const answerWithMock = async (text: string) => {
+    if (!result || mockBusy || !mockNluEnabled) return
+    setMockBusy(true)
+    try {
+      setResult(await answerFreeText(result.session, text, extractionAdapter))
+    } catch {
+      setResult(createSafeErrorResult(result.session, 'controller.adapter_error'))
+    } finally {
+      setMockBusy(false)
+    }
+  }
+
   return (
     <div className="app-shell">
       <SafetyBanner />
@@ -65,6 +115,10 @@ export default function App() {
           onAgeChange={setAge}
           onTextChange={setInitialText}
           onStart={begin}
+          mockNluEnabled={mockNluEnabled}
+          questionMode={questionMode}
+          onMockNluChange={setMockNluEnabled}
+          onQuestionModeChange={setQuestionMode}
         />
       )}
 
@@ -75,6 +129,12 @@ export default function App() {
           onAnswer={answer}
           onSkip={skip}
           validationError={result.validationError}
+          displayQuestion={displayQuestion ?? undefined}
+          mockNluEnabled={mockNluEnabled && import.meta.env.DEV}
+          mockBusy={mockBusy}
+          extractionNotice={result.extractionNotice}
+          clarificationQuestion={result.clarificationQuestion}
+          onFreeText={answerWithMock}
         />
       )}
 
@@ -97,7 +157,9 @@ export default function App() {
 
       {result?.session.status === 'error' && <SafeErrorPage onRestart={restart} />}
 
-      {result && <TracePanel events={result.session.traceEvents} />}
+      {result && (
+        <TracePanel events={result.session.traceEvents} llmEvents={result.session.llmTraceEvents} />
+      )}
       <footer>MedAsk · Rule-based intake demo</footer>
     </div>
   )

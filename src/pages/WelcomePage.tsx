@@ -6,6 +6,10 @@ interface WelcomePageProps {
   onAgeChange: (value: string) => void
   onTextChange: (value: string) => void
   onStart: (quickComplaint?: ComplaintId) => void
+  mockNluEnabled: boolean
+  questionMode: 'canonical' | 'mockRewrite'
+  onMockNluChange: (enabled: boolean) => void
+  onQuestionModeChange: (mode: 'canonical' | 'mockRewrite') => void
 }
 
 export function WelcomePage({
@@ -14,6 +18,10 @@ export function WelcomePage({
   onAgeChange,
   onTextChange,
   onStart,
+  mockNluEnabled,
+  questionMode,
+  onMockNluChange,
+  onQuestionModeChange,
 }: WelcomePageProps) {
   const canStart = Number(age) > 0
 
@@ -60,6 +68,41 @@ export function WelcomePage({
         >
           按描述开始整理
         </button>
+
+        {import.meta.env.DEV && (
+          <fieldset className="dev-controls">
+            <legend>开发模式适配器</legend>
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={mockNluEnabled}
+                onChange={(event) => onMockNluChange(event.target.checked)}
+              />
+              启用Mock自然语言理解
+            </label>
+            <div className="question-mode" role="radiogroup" aria-label="问题表达方式">
+              <label>
+                <input
+                  type="radio"
+                  name="question-mode"
+                  checked={questionMode === 'canonical'}
+                  onChange={() => onQuestionModeChange('canonical')}
+                />
+                使用标准问题
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="question-mode"
+                  checked={questionMode === 'mockRewrite'}
+                  onChange={() => onQuestionModeChange('mockRewrite')}
+                />
+                使用模型改写问题
+              </label>
+            </div>
+            <small>当前只使用固定映射Mock，不连接真实模型API。</small>
+          </fieldset>
+        )}
       </section>
     </main>
   )

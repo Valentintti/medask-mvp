@@ -1,6 +1,7 @@
 import type { TraceEvent } from '../types/intake'
+import type { LlmTraceEvent } from '../llm/types'
 
-export function TracePanel({ events }: { events: TraceEvent[] }) {
+export function TracePanel({ events, llmEvents = [] }: { events: TraceEvent[]; llmEvents?: LlmTraceEvent[] }) {
   if (!import.meta.env.DEV) return null
 
   return (
@@ -18,6 +19,23 @@ export function TracePanel({ events }: { events: TraceEvent[] }) {
           </li>
         ))}
       </ol>
+      {llmEvents.length > 0 && (
+        <>
+          <h3>模型适配器元数据</h3>
+          <ol>
+            {llmEvents.map((event) => (
+              <li key={event.requestId}>
+                <code>{event.operation}</code>
+                <span>{event.outcome}</span>
+                <small>
+                  {event.providerName} · 接受 {event.acceptedCandidateCount} · 拒绝 {event.rejectedCandidateCount}
+                  {event.rejectionReasons.length > 0 ? ` · ${event.rejectionReasons.join(', ')}` : ''}
+                </small>
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
     </details>
   )
 }

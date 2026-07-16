@@ -7,9 +7,10 @@ interface QuestionCardProps {
   onAnswer: (value: AnswerValue) => void
   onSkip: () => void
   validationError?: string | null
+  displayQuestion?: string
 }
 
-export function QuestionCard({ slot, onAnswer, onSkip, validationError }: QuestionCardProps) {
+export function QuestionCard({ slot, onAnswer, onSkip, validationError, displayQuestion }: QuestionCardProps) {
   const [value, setValue] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
 
@@ -37,7 +38,7 @@ export function QuestionCard({ slot, onAnswer, onSkip, validationError }: Questi
         <span>{slot.required ? '优先问题' : '补充问题'}</span>
         <span>{slot.label}</span>
       </div>
-      <h2 id="current-question">{slot.question}</h2>
+      <h2 id="current-question">{displayQuestion ?? slot.question}</h2>
 
       {slot.inputType === 'boolean' && (
         <div className="answer-grid">

@@ -1,3 +1,5 @@
+import type { LlmTraceEvent } from '../llm/types'
+
 export type ComplaintId = 'fever' | 'cough'
 
 export type SessionStatus =
@@ -88,6 +90,7 @@ export interface IntakeSession {
   escalationReason: string | null
   initialNarrative?: string
   traceEvents: TraceEvent[]
+  llmTraceEvents: LlmTraceEvent[]
 }
 
 export interface StartSessionInput {
@@ -136,4 +139,6 @@ export interface ControllerResult {
   summary: IntakeSummary | null
   message: string
   validationError?: string | null
+  extractionNotice?: string | null
+  clarificationQuestion?: string | null
 }

@@ -1,4 +1,5 @@
 import { QuestionCard } from '../components/QuestionCard'
+import { FreeTextAnswer } from '../components/FreeTextAnswer'
 import type { AnswerValue, IntakeSession, SlotDefinition } from '../types/intake'
 
 interface IntakePageProps {
@@ -7,9 +8,27 @@ interface IntakePageProps {
   onAnswer: (value: AnswerValue) => void
   onSkip: () => void
   validationError?: string | null
+  displayQuestion?: string
+  mockNluEnabled?: boolean
+  mockBusy?: boolean
+  extractionNotice?: string | null
+  clarificationQuestion?: string | null
+  onFreeText?: (text: string) => Promise<void>
 }
 
-export function IntakePage({ session, question, onAnswer, onSkip, validationError }: IntakePageProps) {
+export function IntakePage({
+  session,
+  question,
+  onAnswer,
+  onSkip,
+  validationError,
+  displayQuestion,
+  mockNluEnabled,
+  mockBusy = false,
+  extractionNotice,
+  clarificationQuestion,
+  onFreeText,
+}: IntakePageProps) {
   return (
     <main className="intake-page">
       <header className="session-header">
@@ -39,7 +58,16 @@ export function IntakePage({ session, question, onAnswer, onSkip, validationErro
         onAnswer={onAnswer}
         onSkip={onSkip}
         validationError={validationError}
+        displayQuestion={displayQuestion}
       />
+      {mockNluEnabled && onFreeText && (
+        <FreeTextAnswer
+          busy={mockBusy}
+          notice={extractionNotice}
+          clarification={clarificationQuestion}
+          onSubmit={onFreeText}
+        />
+      )}
     </main>
   )
 }
