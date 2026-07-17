@@ -81,6 +81,31 @@ const BUILT_IN_RESPONSES: Record<string, unknown> = {
   '头晕已经缓解': response([
     { slotId: 'dizzinessPattern', value: 'uncertain', confidence: 0.99, evidence: '头晕已经缓解', status: 'resolved' },
   ]),
+  '昨天开始右下腹疼': response([
+    { slotId: 'onset', value: '昨天', confidence: 0.98, evidence: '昨天开始', status: 'asserted' },
+    { slotId: 'abdominalLocation', value: 'right', confidence: 0.98, evidence: '右下腹疼', status: 'asserted' },
+  ]),
+  '胃疼反复三天': response([
+    { slotId: 'onset', value: '三天', confidence: 0.96, evidence: '三天', status: 'asserted' },
+    { slotId: 'abdominalPattern', value: 'recurrent', confidence: 0.98, evidence: '反复', status: 'asserted' },
+  ]),
+  '肚脐周围一阵阵疼': response([
+    { slotId: 'abdominalLocation', value: 'periumbilical', confidence: 0.98, evidence: '肚脐周围', status: 'asserted' },
+    { slotId: 'abdominalPattern', value: 'intermittent', confidence: 0.98, evidence: '一阵阵', status: 'asserted' },
+  ]),
+  '没有腹痛': response([
+    { slotId: 'abdominalSensation', value: '腹痛', confidence: 0.99, evidence: '没有腹痛', status: 'negated' },
+  ]),
+  '腹痛已经缓解': response([
+    { slotId: 'abdominalPattern', value: 'uncertain', confidence: 0.99, evidence: '腹痛已经缓解', status: 'resolved' },
+  ]),
+  '腰疼得厉害': response([], true),
+  '如果以后肚子疼怎么办': response([
+    { slotId: 'abdominalSensation', value: '肚子疼', confidence: 0.97, evidence: '肚子疼', status: 'hypothetical' },
+  ]),
+  '腹痛并且呕血': response([
+    { slotId: 'abdominalSensation', value: '腹痛', confidence: 0.98, evidence: '腹痛', status: 'asserted' },
+  ]),
   '__INVALID_JSON__': '{invalid json',
   '__EXTRA_FIELD__': {
     schemaVersion: LLM_SCHEMA_VERSION, candidates: [], unresolvedSlotIds: [], needsClarification: false, diagnosis: '禁止',
@@ -110,6 +135,11 @@ const REWRITES: Record<string, string> = {
   dizzinessTrigger: '头晕通常在什么情况下出现？',
   balanceImpact: '头晕时行走和平衡受到什么影响？',
   dizzinessEpisodeDuration: '每次头晕大约持续多久？',
+  abdominalLocation: '腹痛主要在腹部什么位置？',
+  abdominalPattern: '腹痛是持续、阵发、反复，还是不确定？',
+  abdominalFunctionalImpact: '腹痛对活动、睡眠或进食有多大影响？',
+  abdominalSensation: '请用自己的话描述腹痛的感觉。',
+  abdominalAssociatedStatus: '本次腹痛是否主要伴有呕吐或排便变化？',
   medicationHistory: '针对本次不适，你已经采取过哪些处理？',
 }
 

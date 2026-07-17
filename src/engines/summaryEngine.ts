@@ -9,7 +9,7 @@ function toEntries(
   section: 'onset' | 'current' | 'associated' | 'measures',
 ): SummaryEntry[] {
   return getSessionSlots(session)
-    .filter((slot) => slot.summarySection === section && session.answers[slot.id] !== undefined)
+    .filter((slot) => slot.id !== 'abdominalPainPresent' && slot.summarySection === section && session.answers[slot.id] !== undefined)
     .map((slot) => ({
       label: slot.label,
       value: session.answers[slot.id],
@@ -25,6 +25,7 @@ export function createSummary(session: IntakeSession): IntakeSummary {
   const notApplicableInformation: string[] = []
 
   for (const slot of slots) {
+    if (slot.id === 'abdominalPainPresent') continue
     if (session.answers[slot.id] !== undefined) continue
     if (session.skippedSlotIds.includes(slot.id)) {
       skippedInformation.push(slot.label)

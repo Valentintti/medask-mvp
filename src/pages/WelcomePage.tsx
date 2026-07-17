@@ -39,7 +39,7 @@ export function WelcomePage({
       <div className="eyebrow">就医前信息整理 · 产品演示</div>
       <h1>帮助患者在就医前，<br />整理症状信息。</h1>
       <p className="lead">
-        当前支持 18—65 岁成人的发热、咳嗽、头痛和头晕信息整理。它不会提供疾病诊断、药物或治疗建议。
+        当前支持 18—65 岁成人的发热、咳嗽、头痛、头晕和实验性腹痛信息整理。它不会提供疾病诊断、药物或治疗建议。
       </p>
       <div className="service-status" role="status">
         <span className={realLlmAvailable ? 'status-dot available' : 'status-dot'} />
@@ -86,7 +86,11 @@ export function WelcomePage({
           <button disabled={!canStart} onClick={() => onStart('dizziness')}>
             头晕快速入口
           </button>
+          <button disabled={!canStart} onClick={() => onStart('abdominal_pain')}>
+            腹痛快速入口（实验性）
+          </button>
         </div>
+        <p className="experimental-notice">腹痛模块为实验性信息整理功能。</p>
         <button
           className="text-start"
           disabled={!canStart || !initialText.trim()}
@@ -147,7 +151,7 @@ export function WelcomePage({
             <small>{realLlmAvailable ? '服务端安全代理可用，模型不控制风险和流程。' : '服务端辅助不可用；继续使用规则或开发Mock。'}</small>
           </fieldset>}
       </section>
-      <p className="welcome-example"><strong>示例输入：</strong>“昨天开始头痛，主要在太阳穴，一阵阵的。”</p>
+      <p className="welcome-example"><strong>示例输入：</strong>“昨天开始右下腹疼，一阵一阵的。”</p>
     </main>
   )
 }

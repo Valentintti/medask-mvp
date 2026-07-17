@@ -1,6 +1,6 @@
 import type { LlmTraceEvent } from '../llm/types'
 
-export type ComplaintId = 'fever' | 'cough' | 'headache' | 'dizziness'
+export type ComplaintId = 'fever' | 'cough' | 'headache' | 'dizziness' | 'abdominal_pain'
 
 export type SessionStatus =
   | 'idle'

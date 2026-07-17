@@ -23,7 +23,7 @@ function parseDraft(slot: SlotDefinition, draft: string): AnswerValue {
 
 export function AnswerEditor({ session, error, onSave, onClose }: AnswerEditorProps) {
   const answeredSlots = useMemo(
-    () => getSessionSlots(session).filter((slot) => session.answers[slot.id] !== undefined),
+    () => getSessionSlots(session).filter((slot) => slot.id !== 'abdominalPainPresent' && session.answers[slot.id] !== undefined),
     [session],
   )
   const [selectedId, setSelectedId] = useState(answeredSlots[0]?.id ?? '')

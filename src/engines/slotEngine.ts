@@ -46,6 +46,12 @@ export function selectNextSlot(session: IntakeSession): SlotSelection {
     ...Object.keys(session.answers),
   ])
 
+  // “已采取措施”是交接摘要必问字段；多主诉时也为最后一轮预留位置。
+  if (session.turnCount === session.maxTurns - 1 && !unavailable.has('medicationHistory')) {
+    const measures = getSessionSlots(session).find((slot) => slot.id === 'medicationHistory')
+    if (measures) return { slot: measures, notApplicableSlotIds: [] }
+  }
+
   for (const slot of getSessionSlots(session)) {
     if (unavailable.has(slot.id)) continue
 

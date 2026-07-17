@@ -6,6 +6,60 @@ import type { RiskRule } from '../types/intake'
  */
 export const riskRules: RiskRule[] = [
   {
+    id: 'risk.abdominal.sudden_severe',
+    label: '当前突然剧烈腹痛',
+    allTermGroups: [
+      ['腹痛', '肚子疼', '肚子痛', '胃疼', '胃痛', '上腹痛', '下腹痛', '小腹疼'],
+      ['突然', '一下子', '猛然'],
+      ['剧烈', '非常痛', '疼得厉害', '痛得厉害', '痛到没法说话'],
+    ],
+    maxSpan: 72,
+    escalationReason: '检测到当前突然剧烈腹痛表达',
+  },
+  {
+    id: 'risk.abdominal.hematemesis',
+    label: '当前呕血',
+    terms: ['呕血', '吐血', '吐了血', '呕吐鲜血', '吐出血'],
+    escalationReason: '检测到当前呕血表达',
+  },
+  {
+    id: 'risk.abdominal.blood_in_stool',
+    label: '当前明显便血或黑便',
+    terms: ['明显便血', '大便带血', '便中有血', '排出黑便', '黑便'],
+    escalationReason: '检测到当前明显便血或黑便表达',
+  },
+  {
+    id: 'risk.abdominal.distension_no_passage',
+    label: '明显腹胀且无法排便排气',
+    allTermGroups: [
+      ['明显腹胀', '肚子明显胀', '腹部明显胀', '肚子胀得厉害'],
+      ['无法排便', '完全不能排便', '排不出大便'],
+      ['无法排气', '完全不能排气', '不能排气', '排不出气', '不能放屁'],
+    ],
+    maxSpan: 88,
+    escalationReason: '检测到明显腹胀且无法排便排气表达',
+  },
+  {
+    id: 'risk.abdominal.with_syncope_or_altered_consciousness',
+    label: '腹痛伴晕厥或意识异常',
+    allTermGroups: [
+      ['腹痛', '肚子疼', '肚子痛', '胃疼', '胃痛'],
+      ['晕厥', '昏厥', '突然晕倒', '意识不清', '意识异常', '意识混乱'],
+    ],
+    maxSpan: 88,
+    escalationReason: '检测到腹痛同时伴有晕厥或意识异常表达',
+  },
+  {
+    id: 'risk.abdominal.with_severe_breathing',
+    label: '腹痛伴严重呼吸困难',
+    allTermGroups: [
+      ['腹痛', '肚子疼', '肚子痛', '胃疼', '胃痛'],
+      ['喘不上气', '严重呼吸困难', '无法正常呼吸', '呼吸非常费力'],
+    ],
+    maxSpan: 88,
+    escalationReason: '检测到腹痛同时伴有严重呼吸困难表达',
+  },
+  {
     id: 'risk.headache.sudden_severe',
     label: '突然剧烈头痛',
     allTermGroups: [
@@ -97,6 +151,18 @@ export const riskRules: RiskRule[] = [
     label: '意识异常或昏厥',
     terms: ['意识不清', '意识异常', '意识混乱', '意识很混乱', '昏厥', '晕厥', '突然晕倒', '晕倒了', '难以唤醒', '很难叫醒'],
     escalationReason: '检测到意识异常或昏厥表达',
+  },
+  {
+    id: 'risk.global_other.hemoptysis',
+    label: '咯血相关表达',
+    terms: ['咯血', '咳血', '咳出血', '痰中带血', '痰里有血'],
+    escalationReason: '检测到需要全局风险引擎关注的咯血相关表达',
+  },
+  {
+    id: 'risk.global_other.hematuria',
+    label: '血尿相关表达',
+    terms: ['血尿', '尿血', '尿里有血'],
+    escalationReason: '检测到需要全局风险引擎关注的血尿相关表达',
   },
 ]
 

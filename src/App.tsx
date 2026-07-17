@@ -51,7 +51,9 @@ export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: b
   const llmAvailableEventRecordedRef = useRef(false)
   const mockProvider = useMemo(() => new MockLlmProvider(), [])
   const httpProvider = useMemo(() => new HttpLlmProvider(), [])
-  const activeProvider = staticDemo ? null : adapterMode === 'mock' ? mockProvider : adapterMode === 'real' ? httpProvider : null
+  const realProviderAllowedForSession = !result?.session.chiefComplaints.includes('abdominal_pain')
+  const effectiveAdapterMode = adapterMode === 'real' && !realProviderAllowedForSession ? 'rules' : adapterMode
+  const activeProvider = staticDemo ? null : effectiveAdapterMode === 'mock' ? mockProvider : effectiveAdapterMode === 'real' ? httpProvider : null
   const extractionAdapter = useMemo(() => activeProvider ? new SlotExtractionAdapter(activeProvider, { timeoutMs: 8500 }) : null, [activeProvider])
   const rewriteAdapter = useMemo(() => activeProvider ? new QuestionRewriteAdapter(activeProvider, 8500) : null, [activeProvider])
 
@@ -136,6 +138,11 @@ export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: b
         initialText,
         quickComplaint,
       })
+      if (adapterMode === 'real' && next.session.chiefComplaints.includes('abdominal_pain')) {
+        setAdapterMode('rules')
+        setQuestionMode('canonical')
+        setLlmServiceNotice('腹痛实验性模块当前使用标准规则模式。')
+      }
       recordProductEvent('session_started')
       if (next.session.chiefComplaints.length > 0) recordProductEvent('complaint_selected')
       if (next.session.status === 'escalated') recordProductEvent('risk_escalated')
@@ -290,7 +297,7 @@ export default function App({ staticDemo = STATIC_DEMO_BUILD }: { staticDemo?: b
           onSkip={skip}
           validationError={result.validationError}
           displayQuestion={displayQuestion ?? undefined}
-          llmMode={adapterMode === 'rules' ? null : adapterMode}
+          llmMode={effectiveAdapterMode === 'rules' ? null : effectiveAdapterMode}
           llmBusy={llmBusy}
           extractionNotice={result.extractionNotice ?? llmServiceNotice}
           clarificationQuestion={result.clarificationQuestion}

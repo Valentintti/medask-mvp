@@ -21,7 +21,8 @@
     "prepare:abdominal-review": "node scripts/prepare-abdominal-pain-review.mjs",
     "eval:abdominal-review": "node scripts/evaluate-abdominal-pain-review.mjs",
     "prepare:abdominal-adjudication": "node scripts/prepare-abdominal-pain-adjudication.mjs",
-    "eval:abdominal-adjudication": "node scripts/evaluate-abdominal-pain-adjudication.mjs"
+    "eval:abdominal-adjudication": "node scripts/evaluate-abdominal-pain-adjudication.mjs",
+    "eval:abdominal:experimental": "tsx scripts/evaluate-abdominal-pain-experimental.ts"
   },
   "dependencies": {
     "react": "^19.1.1",

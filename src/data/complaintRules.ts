@@ -4,7 +4,7 @@ const sharedOnset: SlotDefinition = {
   id: 'onset',
   label: '起病时间',
   question: '这些不适大约从什么时候开始？',
-  complaints: ['fever', 'cough', 'headache', 'dizziness'],
+  complaints: ['fever', 'cough', 'headache', 'dizziness', 'abdominal_pain'],
   inputType: 'text',
   required: true,
   priority: 10,
@@ -15,7 +15,7 @@ const sharedBreathingDifficulty: SlotDefinition = {
   id: 'breathingDifficulty',
   label: '呼吸困难',
   question: '现在是否有明显呼吸困难、喘不上气或呼吸非常费力？',
-  complaints: ['fever', 'cough', 'headache', 'dizziness'],
+  complaints: ['fever', 'cough', 'headache', 'dizziness', 'abdominal_pain'],
   inputType: 'boolean',
   required: true,
   priority: 1,
@@ -406,6 +406,97 @@ const dizzinessSlots: SlotDefinition[] = [
   sharedMedicationHistory,
 ]
 
+const abdominalPainSlots: SlotDefinition[] = [
+  sharedOnset,
+  {
+    id: 'abdominalPainPresent',
+    label: '明确腹部疼痛',
+    question: '你现在是否明确有腹部、肚子或胃部疼痛？',
+    complaints: ['abdominal_pain'],
+    inputType: 'boolean',
+    required: true,
+    priority: 0,
+    summarySection: 'current',
+  },
+  {
+    id: 'abdominalLocation',
+    label: '腹痛位置',
+    question: '腹痛主要在上腹、下腹、左侧、右侧、肚脐周围，还是位置不清？',
+    complaints: ['abdominal_pain'],
+    inputType: 'singleSelect',
+    required: true,
+    priority: 20,
+    options: [
+      { label: '上腹', value: 'upper' },
+      { label: '下腹', value: 'lower' },
+      { label: '左侧腹部', value: 'left' },
+      { label: '右侧腹部', value: 'right' },
+      { label: '肚脐周围', value: 'periumbilical' },
+      { label: '位置不清', value: 'unclear' },
+    ],
+    summarySection: 'current',
+  },
+  {
+    id: 'abdominalPattern',
+    label: '腹痛规律',
+    question: '腹痛是持续、阵发、反复，还是暂时不确定？',
+    complaints: ['abdominal_pain'],
+    inputType: 'singleSelect',
+    required: true,
+    priority: 30,
+    options: [
+      { label: '持续', value: 'continuous' },
+      { label: '阵发', value: 'intermittent' },
+      { label: '反复', value: 'recurrent' },
+      { label: '不确定', value: 'uncertain' },
+    ],
+    summarySection: 'current',
+  },
+  {
+    id: 'abdominalFunctionalImpact',
+    label: '对活动、睡眠或进食的影响',
+    question: '腹痛对活动、睡眠或进食有多大影响？',
+    complaints: ['abdominal_pain'],
+    inputType: 'singleSelect',
+    required: true,
+    priority: 40,
+    options: [
+      { label: '影响较小', value: 'mild' },
+      { label: '有一定影响', value: 'moderate' },
+      { label: '影响很大', value: 'severe' },
+      { label: '不确定', value: 'uncertain' },
+    ],
+    summarySection: 'current',
+  },
+  {
+    id: 'abdominalSensation',
+    label: '疼痛描述',
+    question: '请用自己的话描述腹痛的感觉；不确定可以跳过。',
+    complaints: ['abdominal_pain'],
+    inputType: 'text',
+    required: true,
+    priority: 50,
+    summarySection: 'current',
+  },
+  {
+    id: 'abdominalAssociatedStatus',
+    label: '优先伴随情况',
+    question: '本次腹痛是否主要伴有呕吐或排便变化？',
+    complaints: ['abdominal_pain'],
+    inputType: 'singleSelect',
+    required: true,
+    priority: 60,
+    options: [
+      { label: '伴有呕吐', value: 'vomiting' },
+      { label: '伴有排便变化', value: 'bowel_change' },
+      { label: '均没有', value: 'none' },
+      { label: '不确定', value: 'uncertain' },
+    ],
+    summarySection: 'associated',
+  },
+  sharedMedicationHistory,
+]
+
 export const complaintRules: Record<ComplaintRule['id'], ComplaintRule> = {
   fever: {
     id: 'fever',
@@ -435,6 +526,13 @@ export const complaintRules: Record<ComplaintRule['id'], ComplaintRule> = {
     terms: ['眼前发晕', '天旋地转', '房间在转', '头重脚轻', '走路发飘', '晕乎乎', '站不稳', '眩晕', '头晕', '头昏', '发晕', '发飘'],
     slots: dizzinessSlots,
   },
+  abdominal_pain: {
+    id: 'abdominal_pain',
+    displayName: '腹痛（实验性）',
+    description: '18—65岁成人腹痛信息整理实验性演示规则',
+    terms: ['肚脐周围疼', '左上腹痛', '左下腹痛', '右上腹痛', '右下腹痛', '上腹痛', '下腹痛', '小腹疼', '肚子疼', '肚子痛', '胃疼', '胃痛', '腹痛'],
+    slots: abdominalPainSlots,
+  },
 }
 
 export const complaintDisplayNames = {
@@ -442,4 +540,5 @@ export const complaintDisplayNames = {
   cough: '咳嗽',
   headache: '头痛',
   dizziness: '头晕',
+  abdominal_pain: '腹痛（实验性）',
 } as const

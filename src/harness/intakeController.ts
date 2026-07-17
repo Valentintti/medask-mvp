@@ -24,10 +24,11 @@ import type {
 import { createIntakeSession } from './sessionState'
 import { appendTrace } from './traceLogger'
 
-const UNSUPPORTED_AGE_MESSAGE = '当前演示仅支持18—65岁成人的发热、咳嗽、头痛和头晕信息整理。'
-const UNSUPPORTED_COMPLAINT_MESSAGE = '暂时无法用规则识别该主诉。当前演示仅支持发热、咳嗽、头痛和头晕。'
-const UNSUPPORTED_POPULATION_PATTERN = /(?:怀孕|孕期|孕妇|产后|刚生产|刚生完)/u
-const UNSUPPORTED_POPULATION_MESSAGE = '当前演示暂不支持孕产妇或复杂随访场景，请改由人工服务继续。'
+const UNSUPPORTED_AGE_MESSAGE = '当前演示仅支持18—65岁成人的发热、咳嗽、头痛、头晕和实验性腹痛信息整理。'
+const UNSUPPORTED_COMPLAINT_MESSAGE = '暂时无法用规则识别该主诉。当前演示支持发热、咳嗽、头痛、头晕和实验性腹痛信息整理。'
+const UNSUPPORTED_POPULATION_PATTERN = /(?:怀孕|孕期|孕妇|孕周|产后|刚生产|刚生完|恶露|哺乳期|宝宝|婴儿|幼儿|小孩|儿童|男童|女童|儿科|(?:[1-9]|1[0-7]|[一二三四五六七八九]|十(?:[一二三四五六七])?)岁)/u
+const UNSUPPORTED_POPULATION_MESSAGE = '当前演示暂不支持儿童、孕期、产后或复杂随访场景，请改由人工服务继续。'
+const ABDOMINAL_CLARIFICATION_DECLINED_MESSAGE = '目前未确认存在腹部、肚子或胃部疼痛，实验性腹痛流程不会继续。'
 
 function escalate(session: IntakeSession, risk: RiskResult): ControllerResult {
   const previousStatus = session.status
@@ -187,7 +188,10 @@ export function startSession(input: StartSessionInput): ControllerResult {
     ...session,
     chiefComplaints: complaints,
     initialNarrative: initialText || undefined,
-    answers: initialText ? extractInitialAnswers(initialText, complaints) : {},
+    answers: {
+      ...(initialText ? extractInitialAnswers(initialText, complaints) : {}),
+      ...(input.quickComplaint === 'abdominal_pain' ? { abdominalPainPresent: true } : {}),
+    },
     complaintCurrentStatuses,
     feverCurrentStatus: complaints.includes('fever')
       ? detectFeverCurrentStatus(initialText)
@@ -295,6 +299,41 @@ export function answerCurrentSlot(
     }
   }
 
+  // 模糊腹部不适先走固定确认；这一步不属于普通7轮信息槽位。
+  if (slot.id === 'abdominalPainPresent') {
+    if (value !== true) {
+      const previousStatus = session.status
+      let unsupported: IntakeSession = {
+        ...session,
+        answers: { ...session.answers, abdominalPainPresent: false },
+        currentSlotId: null,
+        status: 'unsupported',
+      }
+      unsupported = appendTrace(unsupported, {
+        eventType: 'complaint_matched',
+        input: { source: 'abdominal_clarification' },
+        decision: '用户未确认当前明确腹部疼痛，停止实验性腹痛流程',
+        ruleId: 'complaint.abdominal_pain.clarification_declined',
+        previousStatus,
+        nextStatus: 'unsupported',
+      })
+      return { session: unsupported, question: null, summary: null, message: ABDOMINAL_CLARIFICATION_DECLINED_MESSAGE }
+    }
+    let confirmed: IntakeSession = {
+      ...session,
+      answers: { ...session.answers, abdominalPainPresent: true },
+      currentSlotId: null,
+      complaintCurrentStatuses: { ...session.complaintCurrentStatuses, abdominal_pain: 'current' },
+    }
+    confirmed = appendTrace(confirmed, {
+      eventType: 'slot_answered',
+      input: { slotId: slot.id, source: 'fixed_clarification' },
+      decision: '用户确认当前明确腹部疼痛，进入实验性信息整理',
+      ruleId: 'complaint.abdominal_pain.clarification_confirmed',
+    })
+    return selectQuestion(confirmed)
+  }
+
   let next: IntakeSession = {
     ...session,
     answers: { ...session.answers, [slot.id]: value },
@@ -349,6 +388,9 @@ export function createSafeErrorResult(
 export function skipCurrentSlot(session: IntakeSession, slot: SlotDefinition): ControllerResult {
   if (session.status !== 'collecting' || session.currentSlotId !== slot.id) {
     return { session, question: null, summary: null, message: '当前没有可跳过的问题。' }
+  }
+  if (slot.id === 'abdominalPainPresent') {
+    return answerCurrentSlot(session, slot, false)
   }
 
   let next: IntakeSession = {

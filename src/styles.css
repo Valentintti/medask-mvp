@@ -74,6 +74,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .demo-case-button, .secondary-action { border: 1px solid #a9c8bb; background: #fff; color: #1b5d4c; }
 .demo-case-button:hover, .secondary-action:hover { background: #edf6f2; color: #124c3d; }
 .welcome-example { color: #6a817b; font-size: 14px; }
+.experimental-notice { margin: 10px 0 0; color: #6d5b2d; font-size: 13px; }
 .dev-controls { margin-top: 12px; padding: 16px; border: 1px dashed #9dbdaf; border-radius: 12px; }
 .dev-controls legend { padding: 0 7px; color: #3e655a; font-size: 13px; font-weight: 800; }
 .dev-controls small { color: #738981; }

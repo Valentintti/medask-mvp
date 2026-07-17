@@ -1,13 +1,17 @@
 import { complaintRules } from '../data/complaintRules'
 import type { AnswerValue, ComplaintCurrentStatus, ComplaintId } from '../types/intake'
-import { findTermOccurrences, hasAffirmedTerm, type TermOccurrence } from './contextMatcher'
+import { classifyOccurrenceContext, findTermOccurrences, hasAffirmedTerm, type TermOccurrence } from './contextMatcher'
+import { isInvalidOrConcatenatedMedicalText } from './textEligibility'
 
 const RECENT_TIME_PATTERN = /(?:今天|昨天|前天|最近|这两天|这几天)/u
 const DISTANT_HISTORY_PATTERN = /(?:去年|前年|多年前|小时候|童年|小时侯)/u
 const FEVER_EVENT_PATTERN = /(?:发烧|发热|高烧|低烧|烧到|体温(?:升高|高)|3[5-9](?:\.\d)?\s*(?:℃|度)|4[0-3](?:\.\d)?\s*(?:℃|度))/u
 const FEVER_RESOLVED_PATTERN = /(?:退烧|退热|烧退了|体温(?:已经|已)?恢复正常|现在(?:已经)?好了)/u
-const COMPLAINT_ORDER: ComplaintId[] = ['fever', 'cough', 'headache', 'dizziness']
+const COMPLAINT_ORDER: ComplaintId[] = ['fever', 'cough', 'headache', 'dizziness', 'abdominal_pain']
 const INVALID_TEMPLATE_PATTERN = /(?:患者(?:姓名|年龄)\s*[:：]|主诉\s*[:：]|问题描述问题描述|(?:复制|填写).{0,12}模板)/u
+const ABDOMINAL_AMBIGUITY_PATTERN = /(?:胃还是肚子说不清|腰腹部不舒服|好像肚子有点不适|胃里不太舒服[^。！？]{0,12}说不上是不是疼|前几天(?:腹痛|肚子疼|肚子痛|胃疼|胃痛)[^。！？]{0,16}没说明现在|腹肌酸[^。！？]{0,12}不确定是不是腹痛)/u
+const ABDOMINAL_KNOWLEDGE_PATTERN = /(?:腹痛|肚子疼|肚子痛|胃疼|胃痛)[^，。！？；]{0,10}(?:是什么|有哪些原因|有什么原因|会不会遗传|怎么预防|能治好吗)/u
+const ABDOMINAL_DISTENSION_NO_PASSAGE_PATTERN = /(?:明显腹胀|肚子明显胀|腹部明显胀|肚子胀得厉害)[\s\S]{0,36}(?:无法|完全不能|不能|排不出)(?:排便|大便)[\s\S]{0,20}(?:无法|完全不能|不能|排不出)(?:排气|气|放屁)/u
 
 export function isRecentResolvedFever(text: string): boolean {
   const normalized = text.trim()
@@ -39,15 +43,30 @@ function escapedTerms(complaint: ComplaintId): string {
 
 function currentOccurrences(text: string, complaint: ComplaintId): TermOccurrence[] {
   const occurrences = findTermOccurrences(text, complaintRules[complaint].terms)
+  if (complaint === 'abdominal_pain') {
+    for (const match of text.matchAll(/(?:肚脐周围|左上腹|左下腹|右上腹|右下腹|上腹|下腹|小腹|胃部|胃里|肚子)[^，。！？；,.!?;]{0,8}(?:疼|痛)/gu)) {
+      const index = match.index ?? 0
+      if (/腰腹/u.test(match[0])) continue
+      const classified = classifyOccurrenceContext(text, index, match[0].length)
+      occurrences.push({
+        term: match[0],
+        index,
+        negated: classified.status === 'negated',
+        contextStatus: classified.status,
+        context: classified.context,
+      })
+    }
+  }
   return occurrences.filter((occurrence) => {
     if (occurrence.contextStatus !== 'asserted') return false
+    if (complaint === 'abdominal_pain' && /(?:不疼|不痛)/u.test(occurrence.term)) return false
     if (complaint === 'fever' && isLocalHeatExpression(text, occurrence)) return false
     if (complaint === 'dizziness' && isDizzinessLookalike(text, occurrence)) return false
     return true
   })
 }
 
-function isRecentResolvedComplaint(text: string, complaint: 'headache' | 'dizziness'): boolean {
+function isRecentResolvedComplaint(text: string, complaint: 'headache' | 'dizziness' | 'abdominal_pain'): boolean {
   if (!text.trim() || DISTANT_HISTORY_PATTERN.test(text)) return false
   const occurrenceResolved = findTermOccurrences(text, complaintRules[complaint].terms)
     .some((occurrence) => occurrence.contextStatus === 'resolved')
@@ -58,7 +77,7 @@ function isRecentResolvedComplaint(text: string, complaint: 'headache' | 'dizzin
   return occurrenceResolved || resolvedAfterComplaint
 }
 
-function hasRecurrenceAfterResolution(text: string, complaint: 'headache' | 'dizziness'): boolean {
+function hasRecurrenceAfterResolution(text: string, complaint: 'headache' | 'dizziness' | 'abdominal_pain'): boolean {
   return new RegExp(
     `(?:好了|消失|缓解|恢复正常|不疼了|不晕了)[\\s\\S]{0,18}(?:又|再次|重新|现在又)[\\s\\S]{0,8}(?:${escapedTerms(complaint)})`,
     'u',
@@ -69,10 +88,12 @@ export function detectComplaintCurrentStatus(
   text: string,
   complaint: ComplaintId,
 ): ComplaintCurrentStatus {
-  if (INVALID_TEMPLATE_PATTERN.test(text)) return 'unknown'
+  if (INVALID_TEMPLATE_PATTERN.test(text) || isInvalidOrConcatenatedMedicalText(text)) return 'unknown'
   if (complaint === 'fever') return detectFeverCurrentStatus(text)
+  if (complaint === 'abdominal_pain' && isAmbiguousAbdominalExpression(text)) return 'unknown'
+  if (complaint === 'abdominal_pain' && ABDOMINAL_DISTENSION_NO_PASSAGE_PATTERN.test(text)) return 'current'
   if (
-    (complaint === 'headache' || complaint === 'dizziness') &&
+    (complaint === 'headache' || complaint === 'dizziness' || complaint === 'abdominal_pain') &&
     isRecentResolvedComplaint(text, complaint) &&
     !hasRecurrenceAfterResolution(text, complaint)
   ) return 'resolved'
@@ -82,16 +103,32 @@ export function detectComplaintCurrentStatus(
 
 export function detectComplaints(text: string): ComplaintId[] {
   const normalized = text.trim()
-  if (!normalized || INVALID_TEMPLATE_PATTERN.test(normalized)) return []
+  if (!normalized || INVALID_TEMPLATE_PATTERN.test(normalized) || isInvalidOrConcatenatedMedicalText(normalized)) return []
 
   return COMPLAINT_ORDER.filter((complaint) => {
     if (complaint === 'fever') {
       return currentOccurrences(normalized, complaint).length > 0 || isRecentResolvedFever(normalized)
     }
+    if (complaint === 'abdominal_pain') {
+      if (ABDOMINAL_KNOWLEDGE_PATTERN.test(normalized)) return false
+      if (isAmbiguousAbdominalExpression(normalized)) return true
+      if (ABDOMINAL_DISTENSION_NO_PASSAGE_PATTERN.test(normalized)) return true
+      if (currentOccurrences(normalized, complaint).length > 0) return true
+      if (isRecentResolvedComplaint(normalized, complaint)) return true
+      return false
+    }
     if (currentOccurrences(normalized, complaint).length > 0) return true
     return (complaint === 'headache' || complaint === 'dizziness') &&
       isRecentResolvedComplaint(normalized, complaint)
   })
+}
+
+export function isAmbiguousAbdominalExpression(text: string): boolean {
+  if (!ABDOMINAL_AMBIGUITY_PATTERN.test(text)) return false
+  if (isInvalidOrConcatenatedMedicalText(text) || DISTANT_HISTORY_PATTERN.test(text)) return false
+  const index = text.search(ABDOMINAL_AMBIGUITY_PATTERN)
+  const context = index >= 0 ? text.slice(Math.max(0, index - 18), index + 40) : text
+  return !/(?:如果|假如|万一|以前|去年|小时候|没有|并无|否认)/u.test(context)
 }
 
 export function detectFeverCurrentStatus(text: string): 'current' | 'resolved' | 'unknown' {
@@ -213,6 +250,36 @@ function extractDizzinessTrigger(text: string): 'standing_up' | 'turning_head' |
   return null
 }
 
+function extractAbdominalLocation(text: string): string | null {
+  const locations: Array<[RegExp, string]> = [
+    [/(?:肚脐周围|脐周)/u, 'periumbilical'],
+    [/(?:左上腹|左下腹|左侧腹部|肚子左边)/u, 'left'],
+    [/(?:右上腹|右下腹|右侧腹部|肚子右边)/u, 'right'],
+    [/(?:上腹|胃部)/u, 'upper'],
+    [/(?:下腹|小腹)/u, 'lower'],
+  ]
+  return locations.find(([pattern]) => pattern.test(text))?.[1] ?? null
+}
+
+function extractAbdominalPattern(text: string): 'continuous' | 'intermittent' | 'recurrent' | null {
+  if (currentOccurrences(text, 'abdominal_pain').length === 0) return null
+  if (/(?:反复|经常又|多次出现)/u.test(text)) return 'recurrent'
+  if (/(?:一阵一阵|一阵阵|阵发|时有时无)/u.test(text)) return 'intermittent'
+  if (/(?:一直|持续)/u.test(text)) return 'continuous'
+  return null
+}
+
+function extractAbdominalSensation(text: string): string | null {
+  return text.match(/(?:隐隐疼|隐痛|胀痛|刺痛|绞痛|灼痛|钝痛)/u)?.[0] ?? null
+}
+
+function extractAbdominalAssociatedStatus(text: string): 'vomiting' | 'bowel_change' | 'none' | null {
+  if (hasAffirmedTerm(text, ['呕吐', '吐了', '想吐'])) return 'vomiting'
+  if (hasAffirmedTerm(text, ['腹泻', '拉肚子', '便秘', '排便变化', '大便异常'])) return 'bowel_change'
+  if (/(?:没有|无|不伴)(?:呕吐|排便变化|腹泻|便秘)[^，。！？；]{0,8}(?:也没有|和|或)?(?:呕吐|排便变化|腹泻|便秘)?/u.test(text)) return 'none'
+  return null
+}
+
 export function extractInitialAnswers(
   text: string,
   complaints: ComplaintId[],
@@ -249,6 +316,21 @@ export function extractInitialAnswers(
     if (pattern) answers.dizzinessPattern = pattern
     const trigger = extractDizzinessTrigger(text)
     if (trigger) answers.dizzinessTrigger = trigger
+  }
+
+  if (complaints.includes('abdominal_pain')) {
+    const status = detectComplaintCurrentStatus(text, 'abdominal_pain')
+    if (status === 'current' || status === 'resolved') answers.abdominalPainPresent = true
+    if (status === 'current') {
+      const location = extractAbdominalLocation(text)
+      if (location) answers.abdominalLocation = location
+      const pattern = extractAbdominalPattern(text)
+      if (pattern) answers.abdominalPattern = pattern
+      const sensation = extractAbdominalSensation(text)
+      if (sensation) answers.abdominalSensation = sensation
+      const associated = extractAbdominalAssociatedStatus(text)
+      if (associated) answers.abdominalAssociatedStatus = associated
+    }
   }
 
   if (complaints.includes('fever') && complaints.includes('cough')) {

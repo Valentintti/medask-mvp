@@ -108,7 +108,7 @@ describe('长文本反馈和用户文案', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const user = userEvent.setup()
     render(<App staticDemo />)
-    await user.type(screen.getByLabelText('用一句话描述当前不适（可选）'), '我肚子疼')
+    await user.type(screen.getByLabelText('用一句话描述当前不适（可选）'), '我腿疼')
     await user.click(screen.getByRole('button', { name: '开始整理' }))
     expect(screen.getByText('当前不在支持范围')).toBeInTheDocument()
     expect(screen.queryByText('OUT OF DEMO SCOPE')).not.toBeInTheDocument()

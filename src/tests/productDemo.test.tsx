@@ -35,7 +35,7 @@ describe('产品化页面与演示能力', () => {
     render(<App />)
     expect(screen.getByText('MedAsk')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /帮助患者在就医前/u })).toBeInTheDocument()
-    expect(screen.getByText(/当前支持 18—65 岁成人的发热、咳嗽、头痛和头晕/u)).toBeInTheDocument()
+    expect(screen.getByText(/当前支持 18—65 岁成人的发热、咳嗽、头痛、头晕和实验性腹痛/u)).toBeInTheDocument()
     expect(screen.getByText('当前使用标准规则模式')).toBeInTheDocument()
   })
 
