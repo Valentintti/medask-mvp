@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1.0",
+  "samplingSeed": 20260718,
+  "dataProjectRelativePath": "../medical-intake-data",
+  "candidateQueue": "reports/im_manual_review.csv",
+  "goldV1": "reports/gold/im_manual_review_gold_v1.csv",
+  "goldV2": "reports/validation/gold/im_validation_gold_v2.csv",
+  "rawSourceCsv": "../../Desktop/Chinese-medical-dialogue-data-master/Data_数据/IM_内科/内科5000-33000.csv",
+  "previousReview": "reports/abdominal-pain-targeted-review.csv",
+  "outputCsv": "reports/abdominal-pain-followup-review.csv",
+  "manifest": "reports/abdominal-pain-followup-review-manifest.md",
+  "strata": {
+    "implicit_current_boundary": 2,
+    "unsupported_population": 2,
+    "global_other_risk_routing": 2,
+    "ambiguous_current_or_risk": 2
+  }
+}

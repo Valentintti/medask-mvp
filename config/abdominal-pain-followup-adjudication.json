@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0",
+  "sourceCsv": "reports/abdominal-pain-followup-review.csv",
+  "sourceSha256": "9e37cc6a8b3a88c5ca796ed27b83e19328f829f008611ad553779566d51ab052",
+  "outputCsv": "reports/abdominal-pain-followup-adjudication.csv",
+  "reviewIds": [
+    "ABD-FOLLOWUP-001",
+    "ABD-FOLLOWUP-002",
+    "ABD-FOLLOWUP-003",
+    "ABD-FOLLOWUP-004",
+    "ABD-FOLLOWUP-005"
+  ]
+}

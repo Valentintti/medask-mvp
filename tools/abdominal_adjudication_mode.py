@@ -155,6 +155,12 @@ def select_with_blank(label: str, options: tuple[str, ...], value: str, key: str
     return st.selectbox(label, choices, index=choices.index(value) if value in choices else 0, key=key)
 
 
+def widget_key(review_id: str, field: str) -> str:
+    """按review_id隔离控件状态，避免切换记录后沿用上一条的选择。"""
+
+    return f"{review_id}_{field}"
+
+
 def render_blind_review(shared: Any, rows: list[dict[str, str]]) -> None:
     completed = sum(second_complete(row) for row in rows)
     st.caption("盲审阶段：第一轮标签、抽样分层和预测结果均隐藏。7条全部完成后才解锁两轮对比。")
@@ -166,14 +172,14 @@ def render_blind_review(shared: Any, rows: list[dict[str, str]]) -> None:
     row = next(item for item in visible if item["review_id"] == selected_id)
     render_text(row)
 
-    current = select_with_blank("候选腹痛是否属于当前或近期本次腹痛", CURRENT_OPTIONS, row["human_candidate_current"], "second_current")
-    status = select_with_blank("候选腹痛发生状态", STATUS_OPTIONS, row["human_candidate_status"], "second_status")
-    complaints = st.multiselect("最终症状主诉（可多选）", list(shared.COMPLAINT_OPTIONS), default=[value for value in row["human_candidate_complaints"].split("|") if value], key="second_complaints")
-    intent = select_with_blank("咨询意图", tuple(shared.INTENT_OPTIONS), row["human_candidate_intent"], "second_intent")
-    risk_present = select_with_blank("是否存在需要风险引擎关注的明确语言表达", RISK_PRESENT_OPTIONS, row["human_risk_present"], "second_risk_present")
-    risk_scope = select_with_blank("风险scope", RISK_SCOPE_OPTIONS, row["human_risk_scope"], "second_risk_scope")
-    risk_category = select_with_blank("风险类别", RISK_CATEGORY_OPTIONS, row["human_risk_category"], "second_risk_category")
-    notes = st.text_area("二次裁决备注（uncertain/other时必填）", value=row["human_adjudication_notes"], key="second_notes")
+    current = select_with_blank("候选腹痛是否属于当前或近期本次腹痛", CURRENT_OPTIONS, row["human_candidate_current"], widget_key(selected_id, "second_current"))
+    status = select_with_blank("候选腹痛发生状态", STATUS_OPTIONS, row["human_candidate_status"], widget_key(selected_id, "second_status"))
+    complaints = st.multiselect("最终症状主诉（可多选）", list(shared.COMPLAINT_OPTIONS), default=[value for value in row["human_candidate_complaints"].split("|") if value], key=widget_key(selected_id, "second_complaints"))
+    intent = select_with_blank("咨询意图", tuple(shared.INTENT_OPTIONS), row["human_candidate_intent"], widget_key(selected_id, "second_intent"))
+    risk_present = select_with_blank("是否存在需要风险引擎关注的明确语言表达", RISK_PRESENT_OPTIONS, row["human_risk_present"], widget_key(selected_id, "second_risk_present"))
+    risk_scope = select_with_blank("风险scope", RISK_SCOPE_OPTIONS, row["human_risk_scope"], widget_key(selected_id, "second_risk_scope"))
+    risk_category = select_with_blank("风险类别", RISK_CATEGORY_OPTIONS, row["human_risk_category"], widget_key(selected_id, "second_risk_category"))
+    notes = st.text_area("二次裁决备注（uncertain/other时必填）", value=row["human_adjudication_notes"], key=widget_key(selected_id, "second_notes"))
 
     if st.button("保存二次盲审", type="primary", use_container_width=True):
         if not all([current, status, complaints, intent, risk_present, risk_scope, risk_category]):
@@ -206,9 +212,12 @@ def render_final_adjudication(shared: Any, rows: list[dict[str, str]], first_row
     st.success("7条二次盲审已完成，现在可以查看第一轮并进行最终裁决。")
     st.progress(completed / 7, text=f"最终裁决进度：{completed} / 7")
     first_by_id = {row["review_id"]: row for row in first_rows}
-    ids = [row["review_id"] for row in rows]
-    selected_id = st.selectbox("review_id", ids, key="final_review_id")
-    row = next(item for item in rows if item["review_id"] == selected_id)
+    pending = [row for row in rows if not final_complete(row)]
+    visible = pending or rows
+    ids = [row["review_id"] for row in visible]
+    label = "待裁决 review_id" if pending else "review_id（全部已完成，可复核）"
+    selected_id = st.selectbox(label, ids, key="final_review_id")
+    row = next(item for item in visible if item["review_id"] == selected_id)
     first = first_by_id[selected_id]
     render_text(row)
 
@@ -225,15 +234,15 @@ def render_final_adjudication(shared: Any, rows: list[dict[str, str]], first_row
         st.markdown("#### 第二轮（V2口径）")
         st.json({field: row[field] for field in SECOND_FIELDS})
 
-    current = select_with_blank("最终候选当前性", CURRENT_OPTIONS, row["final_candidate_current"], "final_current")
-    status = select_with_blank("最终候选状态", STATUS_OPTIONS, row["final_candidate_status"], "final_status")
-    complaints = st.multiselect("最终主诉（可多选）", list(shared.COMPLAINT_OPTIONS), default=[value for value in row["final_complaints"].split("|") if value], key="final_complaints")
-    intent = select_with_blank("最终意图", tuple(shared.INTENT_OPTIONS), row["final_intent"], "final_intent")
-    risk_present = select_with_blank("最终风险存在性", RISK_PRESENT_OPTIONS, row["final_risk_present"], "final_risk_present")
-    risk_scope = select_with_blank("最终风险scope", RISK_SCOPE_OPTIONS, row["final_risk_scope"], "final_risk_scope")
-    risk_category = select_with_blank("最终风险类别", RISK_CATEGORY_OPTIONS, row["final_risk_category"], "final_risk_category")
-    reason = select_with_blank("裁决理由类别", REASON_OPTIONS, row["final_reason_category"], "final_reason")
-    notes = st.text_area("最终备注（可空；uncertain/other时必填）", value=row["final_notes"], key="final_notes")
+    current = select_with_blank("最终候选当前性", CURRENT_OPTIONS, row["final_candidate_current"], widget_key(selected_id, "final_current"))
+    status = select_with_blank("最终候选状态", STATUS_OPTIONS, row["final_candidate_status"], widget_key(selected_id, "final_status"))
+    complaints = st.multiselect("最终主诉（可多选）", list(shared.COMPLAINT_OPTIONS), default=[value for value in row["final_complaints"].split("|") if value], key=widget_key(selected_id, "final_complaints"))
+    intent = select_with_blank("最终意图", tuple(shared.INTENT_OPTIONS), row["final_intent"], widget_key(selected_id, "final_intent"))
+    risk_present = select_with_blank("最终风险存在性", RISK_PRESENT_OPTIONS, row["final_risk_present"], widget_key(selected_id, "final_risk_present"))
+    risk_scope = select_with_blank("最终风险scope", RISK_SCOPE_OPTIONS, row["final_risk_scope"], widget_key(selected_id, "final_risk_scope"))
+    risk_category = select_with_blank("最终风险类别", RISK_CATEGORY_OPTIONS, row["final_risk_category"], widget_key(selected_id, "final_risk_category"))
+    reason = select_with_blank("裁决理由类别", REASON_OPTIONS, row["final_reason_category"], widget_key(selected_id, "final_reason"))
+    notes = st.text_area("最终备注（可空；uncertain/other时必填）", value=row["final_notes"], key=widget_key(selected_id, "final_notes"))
 
     if st.button("保存最终裁决", type="primary", use_container_width=True):
         if not all([current, status, complaints, intent, risk_present, risk_scope, risk_category, reason]):
@@ -261,6 +270,7 @@ def render_final_adjudication(shared: Any, rows: list[dict[str, str]], first_row
             "final_reason_category": reason,
             "final_notes": notes.strip(),
         })
+        # 当前记录保存后会离开“待裁决”列表，下一次运行自动显示下一条。
         st.rerun()
 
 

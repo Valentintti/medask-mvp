@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0",
+  "samplingSeed": 20260719,
+  "candidateQueue": "../medical-intake-data/reports/im_manual_review.csv",
+  "previousFiles": [
+    "reports/abdominal-pain-targeted-review.csv",
+    "reports/abdominal-pain-followup-review.csv"
+  ],
+  "outputCsv": "reports/abdominal-pain-risk-targeted-review.csv",
+  "manifest": "reports/abdominal-pain-risk-targeted-manifest.md",
+  "strata": {
+    "abdominal_specific_current": 2,
+    "global_other_current": 2,
+    "negated_risk": 1,
+    "historical_or_hypothetical_risk": 1
+  }
+}
